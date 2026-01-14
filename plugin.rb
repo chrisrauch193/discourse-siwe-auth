@@ -18,7 +18,7 @@ gem 'mkmfmf', '0.4', require: false
 gem 'keccak', '1.3.0', require: false
 gem 'zip', '2.0.2', require: false
 gem 'mini_portile2', '2.8.0', require: false
-gem 'rbsecp256k1', '6.0.0', require: false
+gem 'rbsecp256k1', git: 'https://github.com/chrisrauch193/rbsecp256k1.git', require: false
 gem 'konstructor', '1.0.2', require: false
 gem 'ffi', '1.17.2', require: false
 gem 'ffi-compiler', '1.0.1', require: false
