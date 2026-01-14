@@ -5,7 +5,7 @@ import Web3Modal from "../lib/web3modal";
 export default Controller.extend({
   init() {
     this._super(...arguments);
-    this.initAuth();
+    // Don't auto-init - wait for user to click the button
   },
 
   verifySignature(account, message, signature, avatar) {

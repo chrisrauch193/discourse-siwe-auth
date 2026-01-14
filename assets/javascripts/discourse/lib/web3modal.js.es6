@@ -114,11 +114,28 @@ const Web3Modal = EmberObject.extend({
     async runSigningProcess(cb) {
         let isProcessing = false;  // Prevent concurrent sign attempts
         let hasCompleted = false;  // Prevent any more attempts after success
+        let modalOpened = false;   // Track if modal has been opened by user
+        let initialCheckDone = false; // Skip the initial subscribeAccount fire
         
         // Subscribe to account changes
         const unsubscribe = this.modal.subscribeAccount(async (account) => {
+            // Skip the first fire (existing connection check on init)
+            if (!initialCheckDone) {
+                initialCheckDone = true;
+                // If already connected, disconnect first so user must reconnect through modal
+                if (account.isConnected) {
+                    console.log('[SIWE] Existing connection detected, will require fresh sign');
+                }
+                return;
+            }
+            
             // Guard: skip if already processing or completed
             if (isProcessing || hasCompleted) {
+                return;
+            }
+            
+            // Only process if modal was opened
+            if (!modalOpened) {
                 return;
             }
             
@@ -134,7 +151,9 @@ const Web3Modal = EmberObject.extend({
                         const result = await this.signMessage(account.address);
                         hasCompleted = true;
                         unsubscribe();
-                        cb(result);
+                        if (typeof cb === 'function') {
+                            cb(result);
+                        }
                     } catch (e) {
                         console.error('[SIWE] Sign process error:', e);
                         // On error, reset isProcessing but don't auto-retry
@@ -146,7 +165,11 @@ const Web3Modal = EmberObject.extend({
             }
         });
 
-        // Open the modal
+        // Small delay to let initial subscription fire complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Now open the modal
+        modalOpened = true;
         this.modal.open();
     },
 });

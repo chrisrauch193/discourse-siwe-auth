@@ -62,3 +62,23 @@ after_initialize do
     mount ::DiscourseSiwe::Engine, at: '/discourse-siwe'
   end
 end
+
+# Allow WebAssembly for AppKit wallet connections
+extend_content_security_policy(script_src: [:wasm_unsafe_eval])
+
+# Allow AppKit connections to Reown/WalletConnect services
+extend_content_security_policy(
+  connect_src: %w[
+    wss://relay.walletconnect.com
+    wss://relay.walletconnect.org
+    https://api.web3modal.com
+    https://api.web3modal.org
+    https://rpc.walletconnect.com
+    https://rpc.walletconnect.org
+    https://explorer-api.walletconnect.com
+    https://pulse.walletconnect.com
+    https://pulse.walletconnect.org
+    wss://*.walletconnect.com
+    wss://*.walletconnect.org
+  ]
+)
