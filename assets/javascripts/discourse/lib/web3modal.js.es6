@@ -43,7 +43,9 @@ const Web3Modal = EmberObject.extend({
                 icons: [`${siteUrl}/images/logo-small.png`]
             },
             features: {
-                analytics: false
+                analytics: false,
+                email: false,        // Disable email login
+                socials: false       // Disable Google, Apple, etc.
             },
             themeVariables: {
                 '--w3m-z-index': '99999'
@@ -110,9 +112,18 @@ const Web3Modal = EmberObject.extend({
     },
 
     async runSigningProcess(cb) {
+        let isProcessing = false;  // Prevent concurrent sign attempts
+        let hasCompleted = false;  // Prevent any more attempts after success
+        
         // Subscribe to account changes
         const unsubscribe = this.modal.subscribeAccount(async (account) => {
+            // Guard: skip if already processing or completed
+            if (isProcessing || hasCompleted) {
+                return;
+            }
+            
             if (account.isConnected && account.address) {
+                isProcessing = true;
                 this.connectedAddress = account.address;
                 
                 // Wait a moment for provider to be ready
@@ -121,11 +132,16 @@ const Web3Modal = EmberObject.extend({
                 if (this.provider) {
                     try {
                         const result = await this.signMessage(account.address);
+                        hasCompleted = true;
                         unsubscribe();
                         cb(result);
                     } catch (e) {
                         console.error('[SIWE] Sign process error:', e);
+                        // On error, reset isProcessing but don't auto-retry
+                        isProcessing = false;
                     }
+                } else {
+                    isProcessing = false;
                 }
             }
         });
