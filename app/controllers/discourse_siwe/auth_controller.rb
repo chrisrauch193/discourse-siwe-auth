@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
 require 'siwe'
+require 'eth'
+
 module DiscourseSiwe
   class AuthController < ::ApplicationController
     def index
     end
 
     def message
-      eth_account = params[:eth_account]
+      # Convert address to EIP-55 checksum format (SIWE gem requires this)
+      eth_account = Eth::Address.new(params[:eth_account]).checksummed
+      
       domain = Discourse.base_url
       domain.slice!("#{Discourse.base_protocol}://")
       message = Siwe::Message.new(domain, eth_account, Discourse.base_url, "1", {
