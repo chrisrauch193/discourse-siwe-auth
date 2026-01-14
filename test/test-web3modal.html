@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIWE Web3Modal Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #00d9ff; }
+        button {
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        button:hover { background: #00b8d4; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        #status {
+            background: #252542;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            min-height: 100px;
+        }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+        .info { color: #2196f3; }
+        pre {
+            background: #1a1a2e;
+            padding: 10px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SIWE Web3Modal Test</h1>
+    <p>Test the Web3Modal v2 integration with the Chrome fix applied.</p>
+    
+    <button id="initBtn">1. Initialize Web3Modal</button>
+    <button id="connectBtn" disabled>2. Open Modal & Connect</button>
+    <button id="signBtn" disabled>3. Sign Test Message</button>
+    
+    <div id="status">
+        <p class="info">Click "Initialize Web3Modal" to start...</p>
+    </div>
+
+    <!-- Load the web3bundle -->
+    <script src="../public/javascripts/web3bundle.min.js"></script>
+    
+    <script>
+        // Your WalletConnect Project ID (from https://cloud.walletconnect.com)
+        const PROJECT_ID = 'YOUR_PROJECT_ID'; // Replace with actual project ID
+        
+        let web3Modal = null;
+        let ethereumClient = null;
+        let connectedAccount = null;
+        
+        const statusDiv = document.getElementById('status');
+        const initBtn = document.getElementById('initBtn');
+        const connectBtn = document.getElementById('connectBtn');
+        const signBtn = document.getElementById('signBtn');
+        
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            p.className = type;
+            p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            statusDiv.appendChild(p);
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+            console.log(`[${type}]`, message);
+        }
+        
+        function logError(error) {
+            log(`Error: ${error.message || error}`, 'error');
+            console.error(error);
+        }
+        
+        // Step 1: Initialize Web3Modal
+        initBtn.addEventListener('click', async () => {
+            statusDiv.innerHTML = '';
+            log('Starting Web3Modal initialization...');
+            
+            try {
+                // CHROME FIX: Ensure window.ethereum exists before Web3Modal init
+                if (typeof window.ethereum === 'undefined') {
+                    log('window.ethereum is undefined, setting to null (Chrome fix)', 'info');
+                    window.ethereum = null;
+                } else {
+                    log('window.ethereum detected: ' + (window.ethereum ? 'present' : 'null'), 'info');
+                }
+                
+                // Check if bundle loaded
+                if (!window.Web3Modal) {
+                    throw new Error('Web3Modal not loaded. Check if web3bundle.min.js loaded correctly.');
+                }
+                log('Web3Modal library loaded', 'success');
+                
+                if (!window.WagmiCore) {
+                    throw new Error('WagmiCore not loaded.');
+                }
+                log('WagmiCore library loaded', 'success');
+                
+                if (!window.Web3ModalEth) {
+                    throw new Error('Web3ModalEth not loaded.');
+                }
+                log('Web3ModalEth library loaded', 'success');
+                
+                // Configure chains
+                const chains = [window.WagmiCore.mainnet, window.WagmiCore.polygon];
+                log('Chains configured: mainnet, polygon', 'info');
+                
+                // Configure providers
+                const { publicClient } = window.WagmiCore.configureChains(
+                    chains, 
+                    [window.Web3ModalEth.w3mProvider({ projectId: PROJECT_ID })]
+                );
+                log('Public client configured', 'success');
+                
+                // Create wagmi config
+                const wagmiConfig = window.WagmiCore.createConfig({
+                    autoConnect: true,
+                    connectors: window.Web3ModalEth.w3mConnectors({ 
+                        projectId: PROJECT_ID, 
+                        version: 2, 
+                        chains 
+                    }),
+                    publicClient
+                });
+                log('Wagmi config created', 'success');
+                
+                // Create Ethereum client
+                const EthereumClient = window.Web3ModalEth.EthereumClient;
+                ethereumClient = new EthereumClient(wagmiConfig, chains);
+                window.ethereumClient = ethereumClient;
+                log('EthereumClient created', 'success');
+                
+                // Create Web3Modal instance
+                web3Modal = new window.Web3Modal(
+                    { projectId: PROJECT_ID, themeVariables: { '--w3m-z-index': '99999' } }, 
+                    ethereumClient
+                );
+                log('Web3Modal instance created', 'success');
+                
+                // Watch for account changes
+                window.WagmiCore.watchAccount((account) => {
+                    if (account.isConnected && account.address) {
+                        connectedAccount = account;
+                        log(`Connected: ${account.address.slice(0, 6)}...${account.address.slice(-4)}`, 'success');
+                        signBtn.disabled = false;
+                    } else if (!account.isConnected) {
+                        connectedAccount = null;
+                        log('Disconnected', 'info');
+                        signBtn.disabled = true;
+                    }
+                });
+                
+                log('Web3Modal initialized successfully!', 'success');
+                initBtn.disabled = true;
+                connectBtn.disabled = false;
+                
+            } catch (error) {
+                logError(error);
+            }
+        });
+        
+        // Step 2: Open modal
+        connectBtn.addEventListener('click', () => {
+            log('Opening Web3Modal...', 'info');
+            try {
+                web3Modal.openModal();
+            } catch (error) {
+                logError(error);
+            }
+        });
+        
+        // Step 3: Sign message
+        signBtn.addEventListener('click', async () => {
+            if (!connectedAccount) {
+                log('No account connected', 'error');
+                return;
+            }
+            
+            log('Requesting signature...', 'info');
+            try {
+                const walletClient = await connectedAccount.connector.getWalletClient();
+                const signature = await walletClient.signMessage({
+                    account: connectedAccount.address,
+                    message: 'Test message from SIWE plugin test page'
+                });
+                log(`Signature: ${signature.slice(0, 20)}...`, 'success');
+            } catch (error) {
+                logError(error);
+            }
+        });
+        
+        // Initial check
+        log('Test page loaded. Browser: ' + navigator.userAgent.split(' ').pop(), 'info');
+    </script>
+</body>
+</html>
