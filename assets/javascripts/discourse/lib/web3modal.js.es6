@@ -13,6 +13,7 @@ const Web3Modal = EmberObject.extend({
     wagmiAdapter: null,
     provider: null,
     connectedAddress: null,
+    _currentUnsubscribe: null,  // Track current subscription to clean up
     
     async providerInit(env) {
         await this.loadScripts();
@@ -112,19 +113,30 @@ const Web3Modal = EmberObject.extend({
     },
 
     async runSigningProcess(cb) {
+        // Clean up any previous subscription to prevent stale callbacks
+        if (this._currentUnsubscribe) {
+            try {
+                this._currentUnsubscribe();
+            } catch (e) {
+                console.log('[SIWE] Cleanup previous subscription');
+            }
+            this._currentUnsubscribe = null;
+        }
+        
         let isProcessing = false;  // Prevent concurrent sign attempts
         let hasCompleted = false;  // Prevent any more attempts after success
-        let modalOpened = false;   // Track if modal has been opened by user
         let initialCheckDone = false; // Skip the initial subscribeAccount fire
+        
+        // Store callback reference to ensure it's available
+        const callback = cb;
         
         // Subscribe to account changes
         const unsubscribe = this.modal.subscribeAccount(async (account) => {
             // Skip the first fire (existing connection check on init)
             if (!initialCheckDone) {
                 initialCheckDone = true;
-                // If already connected, disconnect first so user must reconnect through modal
                 if (account.isConnected) {
-                    console.log('[SIWE] Existing connection detected, will require fresh sign');
+                    console.log('[SIWE] Existing connection detected, waiting for user action');
                 }
                 return;
             }
@@ -134,42 +146,46 @@ const Web3Modal = EmberObject.extend({
                 return;
             }
             
-            // Only process if modal was opened
-            if (!modalOpened) {
-                return;
-            }
-            
             if (account.isConnected && account.address) {
                 isProcessing = true;
                 this.connectedAddress = account.address;
+                console.log('[SIWE] Wallet connected:', account.address);
                 
                 // Wait a moment for provider to be ready
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
                 if (this.provider) {
                     try {
+                        console.log('[SIWE] Starting sign message flow');
                         const result = await this.signMessage(account.address);
+                        console.log('[SIWE] Sign successful, calling callback');
                         hasCompleted = true;
                         unsubscribe();
-                        if (typeof cb === 'function') {
-                            cb(result);
+                        this._currentUnsubscribe = null;
+                        if (typeof callback === 'function') {
+                            callback(result);
+                        } else {
+                            console.error('[SIWE] Callback is not a function:', typeof callback);
                         }
                     } catch (e) {
                         console.error('[SIWE] Sign process error:', e);
-                        // On error, reset isProcessing but don't auto-retry
                         isProcessing = false;
                     }
                 } else {
+                    console.log('[SIWE] Provider not ready, waiting...');
                     isProcessing = false;
                 }
             }
         });
+        
+        // Store unsubscribe function for cleanup
+        this._currentUnsubscribe = unsubscribe;
 
         // Small delay to let initial subscription fire complete
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Now open the modal
-        modalOpened = true;
+        // Open the modal
+        console.log('[SIWE] Opening wallet modal');
         this.modal.open();
     },
 });

@@ -2,6 +2,10 @@ import Controller from "@ember/controller";
 import { withPluginApi } from "discourse/lib/plugin-api";
 import Web3Modal from "../lib/web3modal";
 
+// Singleton instance to avoid multiple AppKit initializations
+let web3ModalInstance = null;
+let isInitialized = false;
+
 export default Controller.extend({
   init() {
     this._super(...arguments);
@@ -24,14 +28,25 @@ export default Controller.extend({
         PROJECT_ID: siteSettings.siwe_project_id,
       }
     });
-    let provider = Web3Modal.create();
-    await provider.providerInit(env);
-    await provider.runSigningProcess(async (res) => {
+    
+    // Use singleton pattern - only initialize AppKit once
+    if (!web3ModalInstance) {
+      web3ModalInstance = Web3Modal.create();
+    }
+    
+    // Only initialize AppKit once
+    if (!isInitialized) {
+      await web3ModalInstance.providerInit(env);
+      isInitialized = true;
+    }
+    
+    // Run signing process with callback
+    await web3ModalInstance.runSigningProcess((res) => {
       try {
         const [account, message, signature, avatar] = res;
         this.verifySignature(account, message, signature, avatar);
       } catch (e) {
-        console.error(e);
+        console.error('[SIWE] Verify error:', e);
       }
     });
   },
