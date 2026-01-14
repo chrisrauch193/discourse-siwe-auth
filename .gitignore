@@ -1,1 +1,2 @@
-gems/**
+gems/
+bundle/node_modules/**

@@ -1,0 +1,18 @@
+{
+  "name": "discourse-siwe-appkit-bundle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@reown/appkit": "^1.6.8",
+    "@reown/appkit-adapter-wagmi": "^1.6.8",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

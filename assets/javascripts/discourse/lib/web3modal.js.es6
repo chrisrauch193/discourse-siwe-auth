@@ -9,89 +9,129 @@ import loadScript from "discourse/lib/load-script";
 
 
 const Web3Modal = EmberObject.extend({
-    web3Modal: null,
-    ethereumClient: null,
+    modal: null,
+    wagmiAdapter: null,
+    provider: null,
+    connectedAddress: null,
+    
     async providerInit(env) {
         await this.loadScripts();
         
-        // Fix for Chrome: ensure window.ethereum exists before Web3Modal init
-        // Web3Modal v2 throws "Cannot read properties of null (reading 'some')"
-        // when window.ethereum is undefined during wallet detection
-        if (typeof window.ethereum === 'undefined') {
-            window.ethereum = null;
-        }
-        
-        const Web3Modal = window.Web3Modal;
-        const chains = [window.WagmiCore.mainnet, window.WagmiCore.polygon];
+        const { createAppKit, WagmiAdapter, networks } = window.ReownAppKit;
         const projectId = env.PROJECT_ID;
-        const { publicClient } = window.WagmiCore.configureChains(chains, [window.Web3ModalEth.w3mProvider({ projectId })]);
-        const wagmiConfig = window.WagmiCore.createConfig({
-            autoConnect: true,
-            connectors: window.Web3ModalEth.w3mConnectors({ projectId, version: 2, chains }),
-            publicClient
+        
+        // Get the site URL for metadata
+        const siteUrl = window.location.origin;
+        const siteName = document.title || 'Discourse';
+        
+        // Create Wagmi adapter
+        const wagmiAdapter = new WagmiAdapter({
+            projectId,
+            networks: [networks.mainnet, networks.polygon]
         });
-        const EthereumClient = window.Web3ModalEth.EthereumClient;
-        const ethereumClient = new EthereumClient(wagmiConfig, chains);
-        this.ethereumClient = ethereumClient;
-        window.ethereumClient = ethereumClient;
-
-        const modal = new Web3Modal({ projectId, themeVariables: { '--w3m-z-index': '99999' } }, ethereumClient);
-        this.web3Modal = modal;
+        this.wagmiAdapter = wagmiAdapter;
+        
+        // Create AppKit modal
+        const modal = createAppKit({
+            adapters: [wagmiAdapter],
+            networks: [networks.mainnet, networks.polygon],
+            projectId,
+            metadata: {
+                name: siteName,
+                description: 'Sign in with Ethereum',
+                url: siteUrl,
+                icons: [`${siteUrl}/images/logo-small.png`]
+            },
+            features: {
+                analytics: false
+            },
+            themeVariables: {
+                '--w3m-z-index': '99999'
+            }
+        });
+        
+        this.modal = modal;
+        
+        // Subscribe to provider changes
+        modal.subscribeProviders((providers) => {
+            this.provider = providers['eip155'];
+        });
+        
         return modal;
     },
 
     async loadScripts() {
         return Promise.all([
-            loadScript("/plugins/discourse-siwe/javascripts/web3bundle.min.js"),
+            loadScript("/plugins/discourse-siwe/javascripts/appkit-bundle.min.js"),
         ]);
     },
 
-
-    async signMessage(account) {
-        const address = account.address;
-        let name, avatar;
+    async signMessage(address) {
+        let name = null;
+        let avatar = null;
+        
+        // Try to fetch ENS name if available
         try {
-            name = await this.ethereumClient.fetchEnsName({ address });
-            if (name) {
-                avatar = await this.ethereumClient.fetchEnsAvatar({ name });
-            }
+            // ENS resolution would require additional setup
+            // For now, we'll skip ENS and use the address
         } catch (error) {
-            console.error(error);
+            console.error('[SIWE] ENS lookup error:', error);
         }
 
-        const {
-            message
-        } = await ajax('/discourse-siwe/message', {
+        // Get chain ID from provider
+        let chainId = 1; // Default to mainnet
+        try {
+            const chainIdHex = await this.provider.request({ method: 'eth_chainId' });
+            chainId = parseInt(chainIdHex, 16);
+        } catch (error) {
+            console.error('[SIWE] Chain ID error:', error);
+        }
+
+        // Get SIWE message from backend
+        const { message } = await ajax('/discourse-siwe/message', {
             data: {
                 eth_account: address,
-                chain_id: await account.connector.getChainId(),
+                chain_id: chainId,
             }
-        })
-            .catch(popupAjaxError);
+        }).catch(popupAjaxError);
 
+        // Sign the message using personal_sign
         try {
-            const signature = await (
-                await account.connector.getWalletClient()
-            ).signMessage({
-                account: address,
-                message: message,
+            const signature = await this.provider.request({
+                method: 'personal_sign',
+                params: [message, address]
             });
+            
             return [name || address, message, signature, avatar];
-
         } catch (e) {
+            console.error('[SIWE] Signing error:', e);
             throw e;
         }
     },
 
     async runSigningProcess(cb) {
-        window.WagmiCore.watchAccount(async (account) => {
+        // Subscribe to account changes
+        const unsubscribe = this.modal.subscribeAccount(async (account) => {
             if (account.isConnected && account.address) {
-                this.connected = true;
-                cb(await this.signMessage(account));
+                this.connectedAddress = account.address;
+                
+                // Wait a moment for provider to be ready
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                if (this.provider) {
+                    try {
+                        const result = await this.signMessage(account.address);
+                        unsubscribe();
+                        cb(result);
+                    } catch (e) {
+                        console.error('[SIWE] Sign process error:', e);
+                    }
+                }
             }
         });
 
-        this.web3Modal.openModal();
+        // Open the modal
+        this.modal.open();
     },
 });
 
