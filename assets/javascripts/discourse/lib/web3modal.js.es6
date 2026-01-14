@@ -13,6 +13,14 @@ const Web3Modal = EmberObject.extend({
     ethereumClient: null,
     async providerInit(env) {
         await this.loadScripts();
+        
+        // Fix for Chrome: ensure window.ethereum exists before Web3Modal init
+        // Web3Modal v2 throws "Cannot read properties of null (reading 'some')"
+        // when window.ethereum is undefined during wallet detection
+        if (typeof window.ethereum === 'undefined') {
+            window.ethereum = null;
+        }
+        
         const Web3Modal = window.Web3Modal;
         const chains = [window.WagmiCore.mainnet, window.WagmiCore.polygon];
         const projectId = env.PROJECT_ID;
