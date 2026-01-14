@@ -4,38 +4,12 @@
   <textarea id="eth_signature" name="eth_signature"></textarea>
   <textarea id="eth_avatar" name="eth_avatar"></textarea>
 </form>
-
 <div class="eth_provider_container">
-  <div class="eth_provider_header">
-    <h2>Sign in with Ethereum</h2>
-    <p>Connect your wallet to authenticate</p>
-  </div>
-  
-  {{#if errorMessage}}
-    <div class="eth_provider_error">
-      <span class="error-icon">⚠️</span>
-      {{errorMessage}}
-    </div>
-  {{/if}}
-  
   <div class="eth_provider_auth_button">
-    {{#if isConnecting}}
-      <button class="btn btn-primary" disabled>
-        <span class="spinner"></span>
-        Connecting...
-      </button>
-    {{else}}
-      {{d-button
-        class="btn-primary"
-        action=(action "initAuth")
-        label="eth_providers.buttons.start"
-      }}
-    {{/if}}
-  </div>
-  
-  <div class="eth_provider_info">
-    <p class="small">
-      Supported wallets: MetaMask, Coinbase Wallet, and other EIP-1193 compatible wallets
-    </p>
+    {{d-button
+      class="btn-primary"
+      action=(action "initAuth")
+      label="eth_providers.buttons.start"
+    }}
   </div>
 </div>

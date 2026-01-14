@@ -8,79 +8,10 @@
   flex-direction: column;
   text-align: center;
   justify-content: center;
-  align-items: center;
   z-index: 9999;
   background-color: var(--secondary);
-  padding: 20px;
 }
 
-.eth_provider_header {
-  margin-bottom: 30px;
-  
-  h2 {
-    font-size: 24px;
-    margin-bottom: 10px;
-    color: var(--primary);
-  }
-  
-  p {
-    color: var(--primary-medium);
-    font-size: 14px;
-  }
-}
-
-.eth_provider_auth_button {
-  margin: 20px 0;
-  
-  .btn {
-    font-size: 16px;
-    padding: 12px 32px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .spinner {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-radius: 50%;
-    border-top-color: #fff;
-    animation: spin 0.8s linear infinite;
-  }
-}
-
-.eth_provider_error {
-  background-color: var(--danger-low);
-  border: 1px solid var(--danger);
-  color: var(--danger);
-  padding: 12px 20px;
-  border-radius: 6px;
-  margin-bottom: 20px;
-  max-width: 400px;
-  
-  .error-icon {
-    margin-right: 8px;
-  }
-}
-
-.eth_provider_info {
-  margin-top: 30px;
-  
-  .small {
-    color: var(--primary-low-mid);
-    font-size: 12px;
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-// Legacy Web3Modal support (can be removed)
 #w3m-modal {
   z-index: 99999;
 }
