@@ -275,18 +275,22 @@
                                 hasCompleted = true;
                                 
                                 // Unsubscribe - handle different return types from subscribeAccount
-                                const unsubscribe = typeof unsubscribeResult === 'function' 
-                                    ? unsubscribeResult 
-                                    : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
-                                        ? unsubscribeResult.unsubscribe 
-                                        : null);
+                                let unsubscribeFn = null;
+                                if (typeof unsubscribeResult === 'function') {
+                                    unsubscribeFn = unsubscribeResult;
+                                } else if (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function') {
+                                    unsubscribeFn = unsubscribeResult.unsubscribe;
+                                }
                                 
-                                if (unsubscribe) {
+                                if (unsubscribeFn && typeof unsubscribeFn === 'function') {
                                     try {
-                                        unsubscribe();
+                                        unsubscribeFn();
+                                        log('Successfully unsubscribed', 'info');
                                     } catch (e) {
                                         log('Unsubscribe error (non-fatal): ' + e.message, 'warn');
                                     }
+                                } else {
+                                    log('No unsubscribe function available (this is OK)', 'info');
                                 }
                                 
                                 this._currentUnsubscribe = null;
@@ -297,6 +301,8 @@
                                 }
                             } catch (e) {
                                 log('Sign process error: ' + e.message, 'error');
+                                log('Error stack: ' + (e.stack || 'no stack'), 'error');
+                                log('Error details: ' + JSON.stringify(e, Object.getOwnPropertyNames(e)), 'error');
                                 // Reset processing flag on error so user can retry
                                 isProcessing = false;
                             }
@@ -307,12 +313,17 @@
                     }
                 });
                 
+                // Log what subscribeAccount returned for debugging
+                log('subscribeAccount returned: ' + typeof unsubscribeResult + (unsubscribeResult ? ' (has unsubscribe: ' + (typeof unsubscribeResult.unsubscribe === 'function') + ')' : ' (null/undefined)'), 'info');
+                
                 // Store unsubscribe function for cleanup (handle different return types)
-                this._currentUnsubscribe = typeof unsubscribeResult === 'function' 
-                    ? unsubscribeResult 
-                    : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
-                        ? () => unsubscribeResult.unsubscribe()
-                        : null);
+                let unsubscribeFn = null;
+                if (typeof unsubscribeResult === 'function') {
+                    unsubscribeFn = unsubscribeResult;
+                } else if (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function') {
+                    unsubscribeFn = () => unsubscribeResult.unsubscribe();
+                }
+                this._currentUnsubscribe = unsubscribeFn;
                 
                 await new Promise(resolve => setTimeout(resolve, 100));
                 
