@@ -274,28 +274,29 @@
                                 log('Sign successful, calling callback', 'success');
                                 hasCompleted = true;
                                 
-                                // Unsubscribe - handle different return types from subscribeAccount
-                                let unsubscribeFn = null;
-                                if (typeof unsubscribeResult === 'function') {
-                                    unsubscribeFn = unsubscribeResult;
-                                } else if (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function') {
-                                    unsubscribeFn = unsubscribeResult.unsubscribe;
-                                }
-                                
-                                if (unsubscribeFn && typeof unsubscribeFn === 'function') {
-                                    try {
-                                        unsubscribeFn();
+                                // Try to unsubscribe, but don't let it block the callback
+                                try {
+                                    if (this._currentUnsubscribe && typeof this._currentUnsubscribe === 'function') {
+                                        this._currentUnsubscribe();
                                         log('Successfully unsubscribed', 'info');
-                                    } catch (e) {
-                                        log('Unsubscribe error (non-fatal): ' + e.message, 'warn');
+                                    } else {
+                                        log('No unsubscribe function available (this is OK)', 'info');
                                     }
-                                } else {
-                                    log('No unsubscribe function available (this is OK)', 'info');
+                                } catch (e) {
+                                    log('Unsubscribe error (non-fatal, continuing): ' + e.message, 'warn');
                                 }
                                 
                                 this._currentUnsubscribe = null;
+                                
+                                // Call the callback - this is the important part
                                 if (typeof callback === 'function') {
-                                    callback(result);
+                                    try {
+                                        callback(result);
+                                    } catch (callbackError) {
+                                        log('Callback error: ' + callbackError.message, 'error');
+                                        log('Callback error stack: ' + (callbackError.stack || 'no stack'), 'error');
+                                        throw callbackError; // Re-throw to be caught by outer catch
+                                    }
                                 } else {
                                     log('Callback is not a function: ' + typeof callback, 'error');
                                 }

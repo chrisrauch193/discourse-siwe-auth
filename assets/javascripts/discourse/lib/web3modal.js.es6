@@ -163,24 +163,26 @@ const Web3Modal = EmberObject.extend({
                         console.log('[SIWE] Sign successful, calling callback');
                         hasCompleted = true;
                         
-                        // Unsubscribe - handle different return types from subscribeAccount
-                        const unsubscribe = typeof unsubscribeResult === 'function' 
-                            ? unsubscribeResult 
-                            : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
-                                ? unsubscribeResult.unsubscribe 
-                                : null);
-                        
-                        if (unsubscribe) {
-                            try {
-                                unsubscribe();
-                            } catch (e) {
-                                console.log('[SIWE] Unsubscribe error (non-fatal):', e);
+                        // Try to unsubscribe, but don't let it block the callback
+                        try {
+                            if (this._currentUnsubscribe && typeof this._currentUnsubscribe === 'function') {
+                                this._currentUnsubscribe();
+                                console.log('[SIWE] Successfully unsubscribed');
                             }
+                        } catch (e) {
+                            console.log('[SIWE] Unsubscribe error (non-fatal, continuing):', e);
                         }
                         
                         this._currentUnsubscribe = null;
+                        
+                        // Call the callback - this is the important part
                         if (typeof callback === 'function') {
-                            callback(result);
+                            try {
+                                callback(result);
+                            } catch (callbackError) {
+                                console.error('[SIWE] Callback error:', callbackError);
+                                throw callbackError; // Re-throw to be caught by outer catch
+                            }
                         } else {
                             console.error('[SIWE] Callback is not a function:', typeof callback);
                         }
