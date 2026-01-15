@@ -40,11 +40,12 @@ export default Controller.extend({
       isInitialized = true;
     }
     
-    // Run signing process with callback
+    // Run signing process with callback - bind 'this' to preserve controller context
+    const controller = this;
     await web3ModalInstance.runSigningProcess((res) => {
       try {
         const [account, message, signature, avatar] = res;
-        this.verifySignature(account, message, signature, avatar);
+        controller.verifySignature(account, message, signature, avatar);
       } catch (e) {
         console.error('[SIWE] Verify error:', e);
       }
