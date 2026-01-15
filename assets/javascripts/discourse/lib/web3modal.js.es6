@@ -92,10 +92,12 @@ const Web3Modal = EmberObject.extend({
 
         // Get SIWE message from backend
         const { message } = await ajax('/discourse-siwe/message', {
+            type: 'GET',
             data: {
                 eth_account: address,
                 chain_id: chainId,
-            }
+            },
+            dataType: 'json'
         }).catch(popupAjaxError);
 
         // Sign the message using personal_sign
