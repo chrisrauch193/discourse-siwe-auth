@@ -238,7 +238,8 @@
                 
                 const callback = cb;
                 
-                const unsubscribe = this.modal.subscribeAccount(async (account) => {
+                // Subscribe to account changes - check what it returns
+                const unsubscribeResult = this.modal.subscribeAccount(async (account) => {
                     // Skip the first fire (existing connection check on init)
                     if (!initialCheckDone) {
                         initialCheckDone = true;
@@ -272,7 +273,22 @@
                                 const result = await this.signMessage(account.address);
                                 log('Sign successful, calling callback', 'success');
                                 hasCompleted = true;
-                                unsubscribe();
+                                
+                                // Unsubscribe - handle different return types from subscribeAccount
+                                const unsubscribe = typeof unsubscribeResult === 'function' 
+                                    ? unsubscribeResult 
+                                    : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
+                                        ? unsubscribeResult.unsubscribe 
+                                        : null);
+                                
+                                if (unsubscribe) {
+                                    try {
+                                        unsubscribe();
+                                    } catch (e) {
+                                        log('Unsubscribe error (non-fatal): ' + e.message, 'warn');
+                                    }
+                                }
+                                
                                 this._currentUnsubscribe = null;
                                 if (typeof callback === 'function') {
                                     callback(result);
@@ -291,7 +307,12 @@
                     }
                 });
                 
-                this._currentUnsubscribe = unsubscribe;
+                // Store unsubscribe function for cleanup (handle different return types)
+                this._currentUnsubscribe = typeof unsubscribeResult === 'function' 
+                    ? unsubscribeResult 
+                    : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
+                        ? () => unsubscribeResult.unsubscribe()
+                        : null);
                 
                 await new Promise(resolve => setTimeout(resolve, 100));
                 

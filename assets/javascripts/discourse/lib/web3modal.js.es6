@@ -132,8 +132,8 @@ const Web3Modal = EmberObject.extend({
         // Store callback reference to ensure it's available
         const callback = cb;
         
-        // Subscribe to account changes
-        const unsubscribe = this.modal.subscribeAccount(async (account) => {
+        // Subscribe to account changes - handle different return types
+        const unsubscribeResult = this.modal.subscribeAccount(async (account) => {
             // Skip the first fire (existing connection check on init)
             if (!initialCheckDone) {
                 initialCheckDone = true;
@@ -162,7 +162,22 @@ const Web3Modal = EmberObject.extend({
                         const result = await this.signMessage(account.address);
                         console.log('[SIWE] Sign successful, calling callback');
                         hasCompleted = true;
-                        unsubscribe();
+                        
+                        // Unsubscribe - handle different return types from subscribeAccount
+                        const unsubscribe = typeof unsubscribeResult === 'function' 
+                            ? unsubscribeResult 
+                            : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
+                                ? unsubscribeResult.unsubscribe 
+                                : null);
+                        
+                        if (unsubscribe) {
+                            try {
+                                unsubscribe();
+                            } catch (e) {
+                                console.log('[SIWE] Unsubscribe error (non-fatal):', e);
+                            }
+                        }
+                        
                         this._currentUnsubscribe = null;
                         if (typeof callback === 'function') {
                             callback(result);
@@ -180,8 +195,12 @@ const Web3Modal = EmberObject.extend({
             }
         });
         
-        // Store unsubscribe function for cleanup
-        this._currentUnsubscribe = unsubscribe;
+        // Store unsubscribe function for cleanup (handle different return types)
+        this._currentUnsubscribe = typeof unsubscribeResult === 'function' 
+            ? unsubscribeResult 
+            : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
+                ? () => unsubscribeResult.unsubscribe()
+                : null);
 
         // Small delay to let initial subscription fire complete
         await new Promise(resolve => setTimeout(resolve, 100));
