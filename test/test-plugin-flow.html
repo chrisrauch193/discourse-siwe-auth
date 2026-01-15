@@ -111,6 +111,7 @@
                 this.provider = null;
                 this.connectedAddress = null;
                 this._currentUnsubscribe = null;
+                this._lastLoggedAddress = null;
             }
             
             async loadScripts() {
@@ -170,19 +171,46 @@
                 try {
                     const chainIdHex = await this.provider.request({ method: 'eth_chainId' });
                     chainId = parseInt(chainIdHex, 16);
+                    // Validate chain ID - if invalid, default to mainnet
+                    if (!chainId || chainId < 1 || chainId > 2147483647) {
+                        log('Invalid chain ID: ' + chainId + ', defaulting to mainnet (1)', 'warn');
+                        chainId = 1;
+                    }
                 } catch (error) {
-                    log('Chain ID error: ' + error, 'warn');
+                    log('Chain ID error: ' + error + ', defaulting to mainnet (1)', 'warn');
+                    chainId = 1;
                 }
                 
                 // Get SIWE message from backend
                 const backendUrl = document.getElementById('backendUrl').value.trim();
-                const response = await fetch(`${backendUrl}/discourse-siwe/message?eth_account=${address}&chain_id=${chainId}`);
+                const response = await fetch(`${backendUrl}/discourse-siwe/message?eth_account=${address}&chain_id=${chainId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include'  // Include cookies for session
+                });
                 
                 if (!response.ok) {
+                    const text = await response.text();
+                    log(`Backend error ${response.status}: ${text.substring(0, 200)}`, 'error');
                     throw new Error(`Backend error: ${response.status} ${response.statusText}`);
                 }
                 
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    log(`Backend returned non-JSON: ${text.substring(0, 200)}`, 'error');
+                    throw new Error('Backend returned HTML instead of JSON. Check CORS and endpoint configuration.');
+                }
+                
                 const data = await response.json();
+                if (!data.message) {
+                    log('Backend response: ' + JSON.stringify(data), 'error');
+                    throw new Error('Backend response missing "message" field');
+                }
                 const message = data.message;
                 
                 // Sign the message
@@ -211,6 +239,7 @@
                 const callback = cb;
                 
                 const unsubscribe = this.modal.subscribeAccount(async (account) => {
+                    // Skip the first fire (existing connection check on init)
                     if (!initialCheckDone) {
                         initialCheckDone = true;
                         if (account.isConnected) {
@@ -219,6 +248,7 @@
                         return;
                     }
                     
+                    // Guard: skip if already processing or completed
                     if (isProcessing || hasCompleted) {
                         return;
                     }
@@ -226,8 +256,14 @@
                     if (account.isConnected && account.address) {
                         isProcessing = true;
                         this.connectedAddress = account.address;
-                        log('Wallet connected: ' + account.address, 'success');
                         
+                        // Only log once per unique address
+                        if (!this._lastLoggedAddress || this._lastLoggedAddress !== account.address) {
+                            log('Wallet connected: ' + account.address, 'success');
+                            this._lastLoggedAddress = account.address;
+                        }
+                        
+                        // Wait a moment for provider to be ready
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
                         if (this.provider) {
@@ -245,6 +281,7 @@
                                 }
                             } catch (e) {
                                 log('Sign process error: ' + e.message, 'error');
+                                // Reset processing flag on error so user can retry
                                 isProcessing = false;
                             }
                         } else {
