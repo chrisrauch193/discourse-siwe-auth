@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIWE Plugin Flow Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0f0f1a;
+            color: #eee;
+        }
+        h1 { color: #3b82f6; margin-bottom: 10px; }
+        h2 { color: #64748b; font-size: 14px; font-weight: normal; margin-top: 0; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #334155; cursor: not-allowed; }
+        #status {
+            background: #1e1e2e;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            min-height: 200px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        .success { color: #22c55e; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        .warn { color: #f59e0b; }
+        .config {
+            background: #1e1e2e;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .config label { display: block; margin-bottom: 5px; color: #94a3b8; }
+        .config input {
+            width: 100%;
+            padding: 10px;
+            background: #0f0f1a;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            color: white;
+            font-family: monospace;
+            margin-bottom: 10px;
+        }
+        .form-result {
+            background: #1e1e2e;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #334155;
+        }
+        .form-result h3 { margin-top: 0; color: #3b82f6; }
+        .form-result pre {
+            background: #0f0f1a;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SIWE Plugin Flow Test</h1>
+    <h2>Simulates the full Discourse plugin flow without needing Discourse</h2>
+    
+    <div class="config">
+        <label for="projectId">WalletConnect Project ID:</label>
+        <input type="text" id="projectId" placeholder="Get one at https://cloud.walletconnect.com" value="">
+        <label for="backendUrl">Backend URL (for SIWE message):</label>
+        <input type="text" id="backendUrl" placeholder="https://forum.chrisrauch.org" value="https://forum.chrisrauch.org">
+    </div>
+    
+    <button id="testBtn">Test Full Plugin Flow</button>
+    <button id="resetBtn">Reset</button>
+    
+    <div id="status">
+        <p class="info">Click "Test Full Plugin Flow" to simulate the Discourse plugin...</p>
+    </div>
+    
+    <div id="formResult" class="form-result" style="display: none;">
+        <h3>Form Submission Result (simulates Discourse callback)</h3>
+        <pre id="formData"></pre>
+    </div>
+
+    <!-- Load the AppKit bundle -->
+    <script src="../public/javascripts/appkit-bundle.min.js"></script>
+    
+    <script>
+        // Simulate the Web3Modal class from web3modal.js.es6
+        class Web3Modal {
+            constructor() {
+                this.modal = null;
+                this.wagmiAdapter = null;
+                this.provider = null;
+                this.connectedAddress = null;
+                this._currentUnsubscribe = null;
+            }
+            
+            async loadScripts() {
+                // Scripts already loaded
+                return Promise.resolve();
+            }
+            
+            async providerInit(env) {
+                await this.loadScripts();
+                
+                const { createAppKit, WagmiAdapter, networks } = window.ReownAppKit;
+                const projectId = env.PROJECT_ID;
+                
+                const siteUrl = window.location.origin;
+                const siteName = 'SIWE Test';
+                
+                const wagmiAdapter = new WagmiAdapter({
+                    projectId,
+                    networks: [networks.mainnet, networks.polygon]
+                });
+                this.wagmiAdapter = wagmiAdapter;
+                
+                const modal = createAppKit({
+                    adapters: [wagmiAdapter],
+                    networks: [networks.mainnet, networks.polygon],
+                    projectId,
+                    metadata: {
+                        name: siteName,
+                        description: 'Sign in with Ethereum',
+                        url: siteUrl,
+                        icons: [`${siteUrl}/favicon.ico`]
+                    },
+                    features: {
+                        analytics: false,
+                        email: false,
+                        socials: false
+                    },
+                    themeVariables: {
+                        '--w3m-z-index': '99999'
+                    }
+                });
+                
+                this.modal = modal;
+                
+                modal.subscribeProviders((providers) => {
+                    this.provider = providers['eip155'];
+                });
+                
+                return modal;
+            }
+            
+            async signMessage(address) {
+                let name = null;
+                let avatar = null;
+                
+                let chainId = 1;
+                try {
+                    const chainIdHex = await this.provider.request({ method: 'eth_chainId' });
+                    chainId = parseInt(chainIdHex, 16);
+                } catch (error) {
+                    log('Chain ID error: ' + error, 'warn');
+                }
+                
+                // Get SIWE message from backend
+                const backendUrl = document.getElementById('backendUrl').value.trim();
+                const response = await fetch(`${backendUrl}/discourse-siwe/message?eth_account=${address}&chain_id=${chainId}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const message = data.message;
+                
+                // Sign the message
+                const signature = await this.provider.request({
+                    method: 'personal_sign',
+                    params: [message, address]
+                });
+                
+                return [name || address, message, signature, avatar];
+            }
+            
+            async runSigningProcess(cb) {
+                if (this._currentUnsubscribe) {
+                    try {
+                        this._currentUnsubscribe();
+                    } catch (e) {
+                        log('Cleanup previous subscription', 'info');
+                    }
+                    this._currentUnsubscribe = null;
+                }
+                
+                let isProcessing = false;
+                let hasCompleted = false;
+                let initialCheckDone = false;
+                
+                const callback = cb;
+                
+                const unsubscribe = this.modal.subscribeAccount(async (account) => {
+                    if (!initialCheckDone) {
+                        initialCheckDone = true;
+                        if (account.isConnected) {
+                            log('Existing connection detected, waiting for user action', 'info');
+                        }
+                        return;
+                    }
+                    
+                    if (isProcessing || hasCompleted) {
+                        return;
+                    }
+                    
+                    if (account.isConnected && account.address) {
+                        isProcessing = true;
+                        this.connectedAddress = account.address;
+                        log('Wallet connected: ' + account.address, 'success');
+                        
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        if (this.provider) {
+                            try {
+                                log('Starting sign message flow', 'info');
+                                const result = await this.signMessage(account.address);
+                                log('Sign successful, calling callback', 'success');
+                                hasCompleted = true;
+                                unsubscribe();
+                                this._currentUnsubscribe = null;
+                                if (typeof callback === 'function') {
+                                    callback(result);
+                                } else {
+                                    log('Callback is not a function: ' + typeof callback, 'error');
+                                }
+                            } catch (e) {
+                                log('Sign process error: ' + e.message, 'error');
+                                isProcessing = false;
+                            }
+                        } else {
+                            log('Provider not ready, waiting...', 'warn');
+                            isProcessing = false;
+                        }
+                    }
+                });
+                
+                this._currentUnsubscribe = unsubscribe;
+                
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                log('Opening wallet modal', 'info');
+                this.modal.open();
+            }
+        }
+        
+        // Simulate the Controller's verifySignature method
+        function verifySignature(account, message, signature, avatar) {
+            log('=== CALLBACK EXECUTED ===', 'success');
+            log('Account: ' + account, 'info');
+            log('Message: ' + message.substring(0, 100) + '...', 'info');
+            log('Signature: ' + signature.substring(0, 20) + '...', 'info');
+            
+            // Simulate form submission
+            const formData = {
+                eth_account: account,
+                eth_message: message,
+                eth_signature: signature,
+                eth_avatar: avatar || ''
+            };
+            
+            document.getElementById('formData').textContent = JSON.stringify(formData, null, 2);
+            document.getElementById('formResult').style.display = 'block';
+            
+            log('Form would be submitted to: /auth/siwe/callback', 'success');
+        }
+        
+        const statusDiv = document.getElementById('status');
+        const testBtn = document.getElementById('testBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        
+        let web3ModalInstance = null;
+        let isInitialized = false;
+        
+        function log(message, type = 'info') {
+            const p = document.createElement('p');
+            p.className = type;
+            p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            statusDiv.appendChild(p);
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+            console.log(`[${type}]`, message);
+        }
+        
+        async function testPluginFlow() {
+            statusDiv.innerHTML = '';
+            document.getElementById('formResult').style.display = 'none';
+            log('=== Starting Plugin Flow Test ===', 'info');
+            
+            const projectId = document.getElementById('projectId').value.trim();
+            if (!projectId) {
+                log('Please enter a WalletConnect Project ID', 'error');
+                return;
+            }
+            
+            const env = {
+                PROJECT_ID: projectId
+            };
+            
+            // Use singleton pattern
+            if (!web3ModalInstance) {
+                web3ModalInstance = new Web3Modal();
+            }
+            
+            // Only initialize AppKit once
+            if (!isInitialized) {
+                log('Initializing AppKit...', 'info');
+                await web3ModalInstance.providerInit(env);
+                isInitialized = true;
+                log('AppKit initialized', 'success');
+            }
+            
+            // Run signing process with callback (simulating controller)
+            log('Starting signing process...', 'info');
+            await web3ModalInstance.runSigningProcess((res) => {
+                try {
+                    const [account, message, signature, avatar] = res;
+                    verifySignature(account, message, signature, avatar);
+                } catch (e) {
+                    log('Verify error: ' + e.message, 'error');
+                }
+            });
+        }
+        
+        testBtn.addEventListener('click', testPluginFlow);
+        
+        resetBtn.addEventListener('click', () => {
+            statusDiv.innerHTML = '';
+            document.getElementById('formResult').style.display = 'none';
+            web3ModalInstance = null;
+            isInitialized = false;
+            log('Reset complete', 'info');
+        });
+        
+        // Initial check
+        log('Test page loaded. Browser: ' + navigator.userAgent.split(' ').pop(), 'info');
+        if (window.ethereum) {
+            log('Injected wallet detected (MetaMask/etc)', 'success');
+        } else {
+            log('No injected wallet - WalletConnect will be used', 'warn');
+        }
+    </script>
+</body>
+</html>
