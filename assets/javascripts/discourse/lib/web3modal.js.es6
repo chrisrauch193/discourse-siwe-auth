@@ -14,6 +14,45 @@ const Web3Modal = EmberObject.extend({
     provider: null,
     connectedAddress: null,
     _currentUnsubscribe: null,  // Track current subscription to clean up
+    _expectedWallet: null,      // Expected wallet from URL param
+    _returnTo: null,            // Return URL after auth
+    
+    /**
+     * Parse URL parameters for auto-connect flow.
+     * Supports:
+     * - wallet=0x... : Expected wallet address
+     * - return_to=/path : Redirect after successful auth
+     */
+    parseUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        
+        const wallet = params.get('wallet');
+        if (wallet && wallet.startsWith('0x')) {
+            this._expectedWallet = wallet.toLowerCase();
+            console.log('[SIWE] Expected wallet from URL:', this._expectedWallet);
+        }
+        
+        const returnTo = params.get('return_to');
+        if (returnTo) {
+            this._returnTo = returnTo;
+            console.log('[SIWE] Return URL:', this._returnTo);
+        }
+        
+        return {
+            wallet: this._expectedWallet,
+            returnTo: this._returnTo
+        };
+    },
+    
+    /**
+     * Redirect to return_to URL if set.
+     */
+    redirectIfNeeded() {
+        if (this._returnTo) {
+            console.log('[SIWE] Redirecting to:', this._returnTo);
+            window.location.href = this._returnTo;
+        }
+    },
     
     async providerInit(env) {
         await this.loadScripts();
@@ -114,7 +153,15 @@ const Web3Modal = EmberObject.extend({
         }
     },
 
-    async runSigningProcess(cb) {
+    async runSigningProcess(cb, options = {}) {
+        // Parse URL params for auto-connect
+        this.parseUrlParams();
+        
+        // Override return URL if provided in options
+        if (options.returnTo) {
+            this._returnTo = options.returnTo;
+        }
+        
         // Clean up any previous subscription to prevent stale callbacks
         if (this._currentUnsubscribe) {
             try {
@@ -131,16 +178,31 @@ const Web3Modal = EmberObject.extend({
         
         // Store callback reference to ensure it's available
         const callback = cb;
+        const self = this;
         
         // Subscribe to account changes - handle different return types
         const unsubscribeResult = this.modal.subscribeAccount(async (account) => {
             // Skip the first fire (existing connection check on init)
             if (!initialCheckDone) {
                 initialCheckDone = true;
-                if (account.isConnected) {
+                
+                // Auto-connect: if we have an expected wallet and it matches
+                if (account.isConnected && account.address && self._expectedWallet) {
+                    const connectedLower = account.address.toLowerCase();
+                    if (connectedLower === self._expectedWallet) {
+                        console.log('[SIWE] Auto-connect: wallet matches expected address');
+                        // Continue to signing flow
+                    } else {
+                        console.log('[SIWE] Auto-connect: connected wallet does not match expected');
+                        console.log('[SIWE] Connected:', connectedLower, 'Expected:', self._expectedWallet);
+                        return; // Let user manually connect correct wallet
+                    }
+                } else if (account.isConnected) {
                     console.log('[SIWE] Existing connection detected, waiting for user action');
+                    return;
+                } else {
+                    return;
                 }
-                return;
             }
             
             // Guard: skip if already processing or completed
@@ -149,39 +211,59 @@ const Web3Modal = EmberObject.extend({
             }
             
             if (account.isConnected && account.address) {
+                // Check if wallet matches expected (if specified)
+                if (self._expectedWallet) {
+                    const connectedLower = account.address.toLowerCase();
+                    if (connectedLower !== self._expectedWallet) {
+                        console.warn('[SIWE] Connected wallet does not match expected. Please connect:', self._expectedWallet);
+                        return;
+                    }
+                }
+                
                 isProcessing = true;
-                this.connectedAddress = account.address;
+                self.connectedAddress = account.address;
                 console.log('[SIWE] Wallet connected:', account.address);
                 
                 // Wait a moment for provider to be ready
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
-                if (this.provider) {
+                if (self.provider) {
                     try {
                         console.log('[SIWE] Starting sign message flow');
-                        const result = await this.signMessage(account.address);
+                        const result = await self.signMessage(account.address);
                         console.log('[SIWE] Sign successful, calling callback');
                         hasCompleted = true;
                         
                         // Try to unsubscribe, but don't let it block the callback
                         try {
-                            if (this._currentUnsubscribe && typeof this._currentUnsubscribe === 'function') {
-                                this._currentUnsubscribe();
+                            if (self._currentUnsubscribe && typeof self._currentUnsubscribe === 'function') {
+                                self._currentUnsubscribe();
                                 console.log('[SIWE] Successfully unsubscribed');
                             }
                         } catch (e) {
                             console.log('[SIWE] Unsubscribe error (non-fatal, continuing):', e);
                         }
                         
-                        this._currentUnsubscribe = null;
+                        self._currentUnsubscribe = null;
                         
                         // Call the callback - this is the important part
                         if (typeof callback === 'function') {
                             try {
                                 callback(result);
+                                
+                                // Redirect after successful auth if return_to is set
+                                // Note: callback usually submits form which redirects,
+                                // but we'll set a timeout fallback
+                                if (self._returnTo) {
+                                    setTimeout(() => {
+                                        if (!document.hidden) {
+                                            self.redirectIfNeeded();
+                                        }
+                                    }, 2000);
+                                }
                             } catch (callbackError) {
                                 console.error('[SIWE] Callback error:', callbackError);
-                                throw callbackError; // Re-throw to be caught by outer catch
+                                throw callbackError;
                             }
                         } else {
                             console.error('[SIWE] Callback is not a function:', typeof callback);
@@ -209,6 +291,9 @@ const Web3Modal = EmberObject.extend({
         
         // Open the modal
         console.log('[SIWE] Opening wallet modal');
+        if (this._expectedWallet) {
+            console.log('[SIWE] Expected wallet:', this._expectedWallet);
+        }
         this.modal.open();
     },
 });

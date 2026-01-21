@@ -45,6 +45,19 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
   def primary_email_verified?
     false
   end
+  
+  def after_authenticate(auth_token, existing_account: nil)
+    result = super
+    
+    # Handle return_to redirect from session (set in auth#index)
+    # Discourse will use destination_url after successful auth
+    if auth_token&.session && auth_token.session[:siwe_return_to]
+      result.destination_url = auth_token.session[:siwe_return_to]
+      auth_token.session.delete(:siwe_return_to)
+    end
+    
+    result
+  end
 end
 
 auth_provider authenticator: ::SiweAuthenticator.new,

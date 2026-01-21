@@ -12,6 +12,30 @@
   background-color: var(--secondary);
 }
 
+.eth_provider_loading,
+.eth_provider_logged_in {
+  padding: 2rem;
+  
+  p {
+    margin: 0.5rem 0;
+    font-size: 1.1rem;
+    color: var(--primary);
+  }
+  
+  strong {
+    color: var(--tertiary);
+  }
+}
+
+.eth_provider_loading p {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 #w3m-modal {
   z-index: 99999;
 }
