@@ -183,12 +183,29 @@ const Web3Modal = EmberObject.extend({
                     method: 'wallet_switchEthereumChain',
                     params: [{ chainId: '0x' + this._expectedChainId.toString(16) }]
                 });
-                // Update chainId after switch
+                
+                // Wait a moment for the switch to complete
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // VERIFY switch actually worked
                 const newChainIdHex = await this.provider.request({ method: 'eth_chainId' });
                 chainId = parseInt(newChainIdHex, 16);
-                console.log('[SIWE] Switched to chain:', chainId);
+                console.log('[SIWE] Chain after switch attempt:', chainId);
+                
+                if (chainId !== this._expectedChainId) {
+                    const failedMsg = `Failed to switch network. Please manually switch to ${networkName} (Chain ID: ${this._expectedChainId}) in your wallet before signing.`;
+                    console.error('[SIWE] Network switch verification failed. Expected:', this._expectedChainId, 'Got:', chainId);
+                    alert(failedMsg);
+                    throw new Error(failedMsg);
+                }
+                
+                console.log('[SIWE] Successfully switched to chain:', chainId);
             } catch (switchError) {
                 console.error('[SIWE] Network switch failed:', switchError);
+                // Re-throw if it's our verification error, otherwise show generic message
+                if (switchError.message && switchError.message.includes('Failed to switch')) {
+                    throw switchError;
+                }
                 alert(errorMsg);
                 throw new Error(errorMsg);
             }

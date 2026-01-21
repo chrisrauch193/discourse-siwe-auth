@@ -31,10 +31,24 @@ module OmniAuth
       end
 
       def callback_phase
+        # Parse and validate request parameters
         eth_message_crlf = request.params['eth_message']
-        eth_message = eth_message_crlf.encode(eth_message_crlf.encoding, universal_newline: true)
         eth_signature = request.params['eth_signature']
-        siwe_message = ::Siwe::Message.from_message(eth_message)
+        
+        # Validate required parameters are present
+        if eth_message_crlf.blank? || eth_signature.blank?
+          Rails.logger.error("[SIWE] Missing required parameters: eth_message=#{eth_message_crlf.present?}, eth_signature=#{eth_signature.present?}")
+          return fail!("missing_parameters")
+        end
+        
+        # Parse SIWE message with error handling
+        begin
+          eth_message = eth_message_crlf.encode(eth_message_crlf.encoding, universal_newline: true)
+          siwe_message = ::Siwe::Message.from_message(eth_message)
+        rescue StandardError => e
+          Rails.logger.error("[SIWE] Failed to parse SIWE message: #{e.class} - #{e.message}")
+          return fail!("invalid_message_format")
+        end
 
         domain = Discourse.base_url
         domain.slice!("#{Discourse.base_protocol}://")
@@ -71,6 +85,11 @@ module OmniAuth
           failure_reason = :invalid_message
         rescue Siwe::InvalidSignature
           failure_reason = :invalid_signature
+        rescue StandardError => e
+          # Catch any unexpected errors to prevent 500 responses
+          Rails.logger.error("[SIWE] Unexpected validation error: #{e.class} - #{e.message}")
+          Rails.logger.error("[SIWE] Backtrace: #{e.backtrace.first(5).join("\n")}")
+          failure_reason = "validation_failed"
         end
 
         return fail!(failure_reason) if failure_reason

@@ -1,6 +1,7 @@
 import Controller from "@ember/controller";
+import { action } from "@ember/object";
 import { withPluginApi } from "discourse/lib/plugin-api";
-import Web3Modal from "../lib/web3modal";
+import Web3Modal from "../../lib/web3modal";
 import { later } from "@ember/runloop";
 
 // Singleton instance to avoid multiple AppKit initializations
@@ -84,7 +85,7 @@ export default Controller.extend({
     document.getElementById("siwe-sign").submit();
   },
 
-  async initAuth() {
+  initAuth: action(async function() {
     const env = withPluginApi("0.11.7", (api) => {
       const siteSettings = api.container.lookup("site-settings:main");
 
@@ -120,11 +121,5 @@ export default Controller.extend({
         console.error('[SIWE] Verify error:', e);
       }
     }, { returnTo });
-  },
-
-  actions: {
-    async initAuth() {
-      this.initAuth();
-    }
-  }
+  }),
 });
