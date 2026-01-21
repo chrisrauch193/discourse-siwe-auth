@@ -7,6 +7,8 @@ import { later } from "@ember/runloop";
 // Singleton instance to avoid multiple AppKit initializations
 let web3ModalInstance = null;
 let isInitialized = false;
+let autoConnectTriggered = false;  // Prevent duplicate auto-connect
+let authInProgress = false;        // Prevent duplicate auth flows
 
 export default Controller.extend({
   isLoading: true,
@@ -17,7 +19,10 @@ export default Controller.extend({
     this._super(...arguments);
     
     // Check for auto-connect URL params after a short delay
-    later(this, this._checkAutoConnect, 500);
+    // Only run once per page load
+    if (!autoConnectTriggered) {
+      later(this, this._checkAutoConnect, 500);
+    }
   },
   
   /**
@@ -26,6 +31,13 @@ export default Controller.extend({
    * But first check if user is already logged in.
    */
   async _checkAutoConnect() {
+    // Prevent duplicate auto-connect calls
+    if (autoConnectTriggered) {
+      console.log('[SIWE] Auto-connect already triggered, skipping');
+      return;
+    }
+    autoConnectTriggered = true;
+    
     const params = new URLSearchParams(window.location.search);
     const wallet = params.get('wallet');
     const returnTo = params.get('return_to') || '/';
@@ -86,40 +98,53 @@ export default Controller.extend({
   },
 
   initAuth: action(async function() {
-    const env = withPluginApi("0.11.7", (api) => {
-      const siteSettings = api.container.lookup("site-settings:main");
+    // Prevent duplicate auth flows
+    if (authInProgress) {
+      console.log('[SIWE] Auth already in progress, skipping');
+      return;
+    }
+    authInProgress = true;
+    
+    try {
+      const env = withPluginApi("0.11.7", (api) => {
+        const siteSettings = api.container.lookup("site-settings:main");
 
-      return {
-        PROJECT_ID: siteSettings.siwe_project_id,
-        CHAIN_ID: siteSettings.siwe_chain_id,
-        CHAIN_NAME: siteSettings.siwe_chain_name,
+        return {
+          PROJECT_ID: siteSettings.siwe_project_id,
+          CHAIN_ID: siteSettings.siwe_chain_id,
+          CHAIN_NAME: siteSettings.siwe_chain_name,
+        }
+      });
+      
+      // Use singleton pattern - only initialize AppKit once
+      if (!web3ModalInstance) {
+        web3ModalInstance = Web3Modal.create();
       }
-    });
-    
-    // Use singleton pattern - only initialize AppKit once
-    if (!web3ModalInstance) {
-      web3ModalInstance = Web3Modal.create();
-    }
-    
-    // Only initialize AppKit once
-    if (!isInitialized) {
-      await web3ModalInstance.providerInit(env);
-      isInitialized = true;
-    }
-    
-    // Get return_to from URL or session storage
-    const params = new URLSearchParams(window.location.search);
-    const returnTo = params.get('return_to') || sessionStorage.getItem('siwe_return_to');
-    
-    // Run signing process with callback - bind 'this' to preserve controller context
-    const controller = this;
-    await web3ModalInstance.runSigningProcess((res) => {
-      try {
-        const [account, message, signature, avatar] = res;
-        controller.verifySignature(account, message, signature, avatar);
-      } catch (e) {
-        console.error('[SIWE] Verify error:', e);
+      
+      // Only initialize AppKit once
+      if (!isInitialized) {
+        await web3ModalInstance.providerInit(env);
+        isInitialized = true;
       }
-    }, { returnTo });
+      
+      // Get return_to from URL or session storage
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('return_to') || sessionStorage.getItem('siwe_return_to');
+      
+      // Run signing process with callback - bind 'this' to preserve controller context
+      const controller = this;
+      await web3ModalInstance.runSigningProcess((res) => {
+        try {
+          const [account, message, signature, avatar] = res;
+          controller.verifySignature(account, message, signature, avatar);
+        } catch (e) {
+          console.error('[SIWE] Verify error:', e);
+          authInProgress = false; // Reset on error
+        }
+      }, { returnTo });
+    } catch (e) {
+      console.error('[SIWE] Init auth error:', e);
+      authInProgress = false; // Reset on error
+    }
   }),
 });

@@ -31,34 +31,45 @@ module OmniAuth
       end
 
       def callback_phase
-        # Parse and validate request parameters
-        eth_message_crlf = request.params['eth_message']
-        eth_signature = request.params['eth_signature']
-        
-        # Validate required parameters are present
-        if eth_message_crlf.blank? || eth_signature.blank?
-          Rails.logger.error("[SIWE] Missing required parameters: eth_message=#{eth_message_crlf.present?}, eth_signature=#{eth_signature.present?}")
-          return fail!("missing_parameters")
-        end
-        
-        # Parse SIWE message with error handling
+        # Wrap entire callback in error handler to prevent 500s
         begin
-          eth_message = eth_message_crlf.encode(eth_message_crlf.encoding, universal_newline: true)
-          siwe_message = ::Siwe::Message.from_message(eth_message)
-        rescue StandardError => e
-          Rails.logger.error("[SIWE] Failed to parse SIWE message: #{e.class} - #{e.message}")
-          return fail!("invalid_message_format")
-        end
+          # Parse and validate request parameters
+          eth_message_crlf = request.params['eth_message']
+          eth_signature = request.params['eth_signature']
+          
+          # Validate required parameters are present
+          if eth_message_crlf.blank? || eth_signature.blank?
+            Rails.logger.error("[SIWE] Missing required parameters: eth_message=#{eth_message_crlf.present?}, eth_signature=#{eth_signature.present?}")
+            return fail!("missing_parameters")
+          end
+          
+          # Parse SIWE message with error handling
+          begin
+            eth_message = eth_message_crlf.encode(eth_message_crlf.encoding, universal_newline: true)
+            siwe_message = ::Siwe::Message.from_message(eth_message)
+          rescue StandardError => e
+            Rails.logger.error("[SIWE] Failed to parse SIWE message: #{e.class} - #{e.message}")
+            return fail!("invalid_message_format")
+          end
 
-        domain = Discourse.base_url
-        domain.slice!("#{Discourse.base_protocol}://")
-        if siwe_message.domain != domain
-          return fail!("Invalid domain")
-        end
+          domain = Discourse.base_url
+          domain.slice!("#{Discourse.base_protocol}://")
+          if siwe_message.domain != domain
+            Rails.logger.error("[SIWE] Domain mismatch: expected=#{domain}, got=#{siwe_message.domain}")
+            return fail!("Invalid domain")
+          end
 
-        if siwe_message.nonce != session[:nonce]
-          return fail!("Invalid nonce")
-        end
+          # Check for missing or mismatched nonce
+          stored_nonce = session[:nonce]
+          if stored_nonce.blank?
+            Rails.logger.error("[SIWE] No nonce in session - session may have expired or been cleared")
+            return fail!("session_expired")
+          end
+          
+          if siwe_message.nonce != stored_nonce
+            Rails.logger.error("[SIWE] Nonce mismatch: expected=#{stored_nonce}, got=#{siwe_message.nonce}")
+            return fail!("Invalid nonce")
+          end
         
         # Validate chain ID matches configured network
         expected_chain_id = SiteSetting.siwe_chain_id.to_i
@@ -95,7 +106,14 @@ module OmniAuth
         return fail!(failure_reason) if failure_reason
 
         super
-      end
+        
+        rescue StandardError => e
+          # Catch-all for any unexpected errors to prevent 500 responses
+          Rails.logger.error("[SIWE] Unexpected error in callback_phase: #{e.class} - #{e.message}")
+          Rails.logger.error("[SIWE] Backtrace: #{e.backtrace.first(10).join("\n")}")
+          return fail!("unexpected_error")
+        end
+      end # callback_phase
       
       private
       
