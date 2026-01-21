@@ -105,7 +105,16 @@ module OmniAuth
 
         return fail!(failure_reason) if failure_reason
 
-        super
+        Rails.logger.info("[SIWE] Validation passed, calling super (OmniAuth callback)")
+        Rails.logger.info("[SIWE] Address: #{siwe_message.address}, Chain: #{message_chain_id}")
+        
+        begin
+          super
+        rescue StandardError => e
+          Rails.logger.error("[SIWE] Error in OmniAuth super callback: #{e.class} - #{e.message}")
+          Rails.logger.error("[SIWE] Super backtrace: #{e.backtrace.first(10).join("\n")}")
+          return fail!("omniauth_error")
+        end
         
         rescue StandardError => e
           # Catch-all for any unexpected errors to prevent 500 responses

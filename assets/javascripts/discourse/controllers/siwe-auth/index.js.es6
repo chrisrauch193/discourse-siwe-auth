@@ -7,8 +7,11 @@ import { later } from "@ember/runloop";
 // Singleton instance to avoid multiple AppKit initializations
 let web3ModalInstance = null;
 let isInitialized = false;
-let autoConnectTriggered = false;  // Prevent duplicate auto-connect
+let lastAutoConnectTime = 0;       // Timestamp of last auto-connect attempt
 let authInProgress = false;        // Prevent duplicate auth flows
+
+// Time window to prevent duplicate auto-connect (in ms)
+const AUTO_CONNECT_COOLDOWN = 3000;
 
 export default Controller.extend({
   isLoading: true,
@@ -18,11 +21,12 @@ export default Controller.extend({
   init() {
     this._super(...arguments);
     
+    // Reset loading state and auth flag when controller initializes
+    this.set('isLoading', true);
+    authInProgress = false;
+    
     // Check for auto-connect URL params after a short delay
-    // Only run once per page load
-    if (!autoConnectTriggered) {
-      later(this, this._checkAutoConnect, 500);
-    }
+    later(this, this._checkAutoConnect, 500);
   },
   
   /**
@@ -31,12 +35,15 @@ export default Controller.extend({
    * But first check if user is already logged in.
    */
   async _checkAutoConnect() {
-    // Prevent duplicate auto-connect calls
-    if (autoConnectTriggered) {
-      console.log('[SIWE] Auto-connect already triggered, skipping');
+    const now = Date.now();
+    
+    // Prevent rapid duplicate auto-connect calls (within cooldown window)
+    if (now - lastAutoConnectTime < AUTO_CONNECT_COOLDOWN) {
+      console.log('[SIWE] Auto-connect called too recently, skipping (cooldown)');
+      this.set('isLoading', false);
       return;
     }
-    autoConnectTriggered = true;
+    lastAutoConnectTime = now;
     
     const params = new URLSearchParams(window.location.search);
     const wallet = params.get('wallet');
@@ -75,6 +82,9 @@ export default Controller.extend({
   },
 
   verifySignature(account, message, signature, avatar) {
+    // Reset auth flag before form submission (page will reload anyway)
+    authInProgress = false;
+    
     // Check for return_to in session storage
     const returnTo = sessionStorage.getItem('siwe_return_to');
     if (returnTo) {
@@ -90,6 +100,7 @@ export default Controller.extend({
       sessionStorage.removeItem('siwe_return_to');
     }
     
+    console.log('[SIWE] Submitting form to /auth/siwe/callback');
     document.getElementById("eth_account").value = account;
     document.getElementById("eth_message").value = message;
     document.getElementById("eth_signature").value = signature;
