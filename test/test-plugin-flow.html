@@ -27,6 +27,8 @@
         }
         button:hover { background: #2563eb; }
         button:disabled { background: #334155; cursor: not-allowed; }
+        button.danger { background: #dc2626; }
+        button.danger:hover { background: #b91c1c; }
         #status {
             background: #1e1e2e;
             padding: 15px;
@@ -49,7 +51,7 @@
             margin: 20px 0;
         }
         .config label { display: block; margin-bottom: 5px; color: #94a3b8; }
-        .config input {
+        .config input, .config select {
             width: 100%;
             padding: 10px;
             background: #0f0f1a;
@@ -74,21 +76,67 @@
             overflow-x: auto;
             font-size: 12px;
         }
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .checkbox-row input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        .checkbox-row label {
+            margin: 0;
+            color: #94a3b8;
+        }
+        .section-title {
+            color: #f59e0b;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin: 15px 0 10px 0;
+            letter-spacing: 1px;
+        }
     </style>
 </head>
 <body>
     <h1>SIWE Plugin Flow Test</h1>
-    <h2>Simulates the full Discourse plugin flow without needing Discourse</h2>
+    <h2>Simulates the full Discourse plugin flow - matches actual plugin code</h2>
     
     <div class="config">
         <label for="projectId">WalletConnect Project ID:</label>
         <input type="text" id="projectId" placeholder="Get one at https://cloud.walletconnect.com" value="">
-        <label for="backendUrl">Backend URL (for SIWE message):</label>
+        
+        <label for="chainId">Expected Chain ID:</label>
+        <select id="chainId">
+            <option value="11155111">Sepolia (11155111)</option>
+            <option value="1">Ethereum Mainnet (1)</option>
+            <option value="137">Polygon (137)</option>
+        </select>
+        
+        <div class="section-title">Backend Options</div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="useMockBackend" checked>
+            <label for="useMockBackend">Use Mock Backend (no CORS issues - for testing JS flow)</label>
+        </div>
+        
+        <label for="backendUrl">Real Backend URL (if mock disabled):</label>
         <input type="text" id="backendUrl" placeholder="https://forum.chrisrauch.org" value="https://forum.chrisrauch.org">
+        
+        <div class="section-title">Debug Options</div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="skipChainValidation">
+            <label for="skipChainValidation">Skip chain validation (for testing when WalletConnect reports wrong chain)</label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" id="simulateDuplicate">
+            <label for="simulateDuplicate">Simulate duplicate init (tests the bug we fixed)</label>
+        </div>
     </div>
     
     <button id="testBtn">Test Full Plugin Flow</button>
     <button id="resetBtn">Reset</button>
+    <button id="hardResetBtn" class="danger">Hard Reset (clears all state)</button>
     
     <div id="status">
         <p class="info">Click "Test Full Plugin Flow" to simulate the Discourse plugin...</p>
@@ -103,7 +151,89 @@
     <script src="../public/javascripts/appkit-bundle.min.js"></script>
     
     <script>
-        // Simulate the Web3Modal class from web3modal.js.es6
+        // ============================================
+        // MOCK BACKEND - Simulates Discourse SIWE endpoints
+        // ============================================
+        const MockBackend = {
+            _nonce: null,
+            _nonceGeneratedAt: null,
+            
+            generateNonce() {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                let nonce = '';
+                for (let i = 0; i < 16; i++) {
+                    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return nonce;
+            },
+            
+            getMessage(ethAccount, chainId) {
+                // Generate new nonce (this is what causes the bug when called twice!)
+                this._nonce = this.generateNonce();
+                this._nonceGeneratedAt = new Date().toISOString();
+                
+                log(`[MockBackend] Generated nonce: ${this._nonce}`, 'info');
+                
+                const domain = window.location.host;
+                const uri = window.location.origin;
+                const issuedAt = new Date().toISOString();
+                
+                const message = `${domain} wants you to sign in with your Ethereum account:
+${ethAccount}
+
+Sign-in to Discourse via Wallet
+
+URI: ${uri}
+Version: 1
+Chain ID: ${chainId}
+Nonce: ${this._nonce}
+Issued At: ${issuedAt}`;
+                
+                return { message };
+            },
+            
+            validateCallback(ethMessage, ethSignature) {
+                // Extract nonce from message
+                const nonceMatch = ethMessage.match(/Nonce: ([A-Za-z0-9]+)/);
+                const messageNonce = nonceMatch ? nonceMatch[1] : null;
+                
+                log(`[MockBackend] Validating - Message nonce: ${messageNonce}, Stored nonce: ${this._nonce}`, 'info');
+                
+                if (!this._nonce) {
+                    return { success: false, error: 'session_expired', message: 'No nonce in session' };
+                }
+                
+                if (messageNonce !== this._nonce) {
+                    return { 
+                        success: false, 
+                        error: 'invalid_nonce', 
+                        message: `Nonce mismatch! Expected: ${this._nonce}, Got: ${messageNonce}` 
+                    };
+                }
+                
+                // In real backend, we'd verify the signature here
+                // For testing, we just check the nonce
+                return { success: true };
+            },
+            
+            reset() {
+                this._nonce = null;
+                this._nonceGeneratedAt = null;
+                log('[MockBackend] Reset - nonce cleared', 'info');
+            }
+        };
+        
+        // ============================================
+        // WEB3MODAL CLASS - Matches actual plugin code
+        // ============================================
+        
+        // Network configurations (same as plugin)
+        const NETWORK_CONFIGS = {
+            1: { id: 1, name: 'Ethereum', rpcUrl: 'https://eth.llamarpc.com' },
+            11155111: { id: 11155111, name: 'Sepolia', rpcUrl: 'https://rpc.sepolia.org' },
+            137: { id: 137, name: 'Polygon', rpcUrl: 'https://polygon-rpc.com' },
+        };
+        
         class Web3Modal {
             constructor() {
                 this.modal = null;
@@ -111,32 +241,70 @@
                 this.provider = null;
                 this.connectedAddress = null;
                 this._currentUnsubscribe = null;
-                this._lastLoggedAddress = null;
+                this._expectedWallet = null;
+                this._returnTo = null;
+                this._expectedChainId = null;
+                this._expectedChainName = null;
             }
             
-            async loadScripts() {
-                // Scripts already loaded
-                return Promise.resolve();
+            parseUrlParams() {
+                const params = new URLSearchParams(window.location.search);
+                
+                const wallet = params.get('wallet');
+                if (wallet && wallet.startsWith('0x')) {
+                    this._expectedWallet = wallet.toLowerCase();
+                    log('[SIWE] Expected wallet from URL: ' + this._expectedWallet, 'info');
+                }
+                
+                const returnTo = params.get('return_to');
+                if (returnTo) {
+                    this._returnTo = returnTo;
+                    log('[SIWE] Return URL: ' + this._returnTo, 'info');
+                }
+                
+                return { wallet: this._expectedWallet, returnTo: this._returnTo };
             }
             
             async providerInit(env) {
-                await this.loadScripts();
-                
                 const { createAppKit, WagmiAdapter, networks } = window.ReownAppKit;
                 const projectId = env.PROJECT_ID;
+                
+                // Store expected chain from settings
+                this._expectedChainId = env.CHAIN_ID ? parseInt(env.CHAIN_ID, 10) : null;
+                this._expectedChainName = env.CHAIN_NAME || null;
+                
+                log('[SIWE] Expected chain: ' + this._expectedChainId + ' ' + this._expectedChainName, 'info');
                 
                 const siteUrl = window.location.origin;
                 const siteName = 'SIWE Test';
                 
+                // Determine which network to use
+                let targetNetwork = networks.mainnet;
+                let networkList = [networks.mainnet, networks.sepolia];
+                
+                if (this._expectedChainId) {
+                    const chainMap = {
+                        1: networks.mainnet,
+                        11155111: networks.sepolia,
+                        137: networks.polygon,
+                    };
+                    
+                    if (chainMap[this._expectedChainId]) {
+                        targetNetwork = chainMap[this._expectedChainId];
+                        networkList = [targetNetwork];
+                    }
+                }
+                
                 const wagmiAdapter = new WagmiAdapter({
                     projectId,
-                    networks: [networks.mainnet, networks.polygon]
+                    networks: networkList
                 });
                 this.wagmiAdapter = wagmiAdapter;
                 
                 const modal = createAppKit({
                     adapters: [wagmiAdapter],
-                    networks: [networks.mainnet, networks.polygon],
+                    networks: networkList,
+                    defaultNetwork: targetNetwork,
                     projectId,
                     metadata: {
                         name: siteName,
@@ -167,51 +335,89 @@
                 let name = null;
                 let avatar = null;
                 
+                // Get chain ID from provider
                 let chainId = 1;
                 try {
                     const chainIdHex = await this.provider.request({ method: 'eth_chainId' });
                     chainId = parseInt(chainIdHex, 16);
-                    // Validate chain ID - if invalid, default to mainnet
-                    if (!chainId || chainId < 1 || chainId > 2147483647) {
-                        log('Invalid chain ID: ' + chainId + ', defaulting to mainnet (1)', 'warn');
-                        chainId = 1;
-                    }
+                    log('[SIWE] Connected chain ID: ' + chainId, 'info');
                 } catch (error) {
-                    log('Chain ID error: ' + error + ', defaulting to mainnet (1)', 'warn');
-                    chainId = 1;
+                    log('[SIWE] Chain ID error: ' + error, 'error');
                 }
                 
-                // Get SIWE message from backend
-                const backendUrl = document.getElementById('backendUrl').value.trim();
-                const response = await fetch(`${backendUrl}/discourse-siwe/message?eth_account=${address}&chain_id=${chainId}`, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json',
-                        'Content-Type': 'application/json'
-                    },
-                    credentials: 'include'  // Include cookies for session
-                });
-                
-                if (!response.ok) {
-                    const text = await response.text();
-                    log(`Backend error ${response.status}: ${text.substring(0, 200)}`, 'error');
-                    throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+                // Check if on the expected chain
+                const skipChainCheck = document.getElementById('skipChainValidation').checked;
+                if (this._expectedChainId && chainId !== this._expectedChainId) {
+                    if (skipChainCheck) {
+                        log('[SIWE] Chain mismatch but SKIPPING validation (debug mode)', 'warn');
+                        log('[SIWE] Expected: ' + this._expectedChainId + ', Got: ' + chainId, 'warn');
+                        // Use the expected chain ID for the message anyway
+                        chainId = this._expectedChainId;
+                    } else {
+                        const networkName = this._expectedChainName || `Chain ${this._expectedChainId}`;
+                        const errorMsg = `Please switch to ${networkName} (Chain ID: ${this._expectedChainId}) to sign in.`;
+                        log('[SIWE] Wrong network: ' + errorMsg, 'error');
+                        
+                        // Try to request network switch
+                        try {
+                            await this.provider.request({
+                                method: 'wallet_switchEthereumChain',
+                                params: [{ chainId: '0x' + this._expectedChainId.toString(16) }]
+                            });
+                            
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                            
+                            // VERIFY switch actually worked
+                            const newChainIdHex = await this.provider.request({ method: 'eth_chainId' });
+                            chainId = parseInt(newChainIdHex, 16);
+                            log('[SIWE] Chain after switch attempt: ' + chainId, 'info');
+                            
+                            if (chainId !== this._expectedChainId) {
+                                const failedMsg = `Failed to switch network. Please manually switch to ${networkName}.`;
+                                log('[SIWE] Network switch verification failed', 'error');
+                                alert(failedMsg);
+                                throw new Error(failedMsg);
+                            }
+                            
+                            log('[SIWE] Successfully switched to chain: ' + chainId, 'success');
+                        } catch (switchError) {
+                            log('[SIWE] Network switch failed: ' + switchError.message, 'error');
+                            if (switchError.message && switchError.message.includes('Failed to switch')) {
+                                throw switchError;
+                            }
+                            alert(errorMsg);
+                            throw new Error(errorMsg);
+                        }
+                    }
                 }
                 
-                // Check if response is JSON
-                const contentType = response.headers.get('content-type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    const text = await response.text();
-                    log(`Backend returned non-JSON: ${text.substring(0, 200)}`, 'error');
-                    throw new Error('Backend returned HTML instead of JSON. Check CORS and endpoint configuration.');
+                // Get SIWE message - either from mock or real backend
+                let message;
+                const useMock = document.getElementById('useMockBackend').checked;
+                
+                if (useMock) {
+                    log('[SIWE] Using mock backend for message generation', 'info');
+                    const result = MockBackend.getMessage(address, chainId);
+                    message = result.message;
+                } else {
+                    const backendUrl = document.getElementById('backendUrl').value.trim();
+                    log('[SIWE] Fetching message from: ' + backendUrl, 'info');
+                    
+                    const response = await fetch(`${backendUrl}/discourse-siwe/message?eth_account=${address}&chain_id=${chainId}`, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'include'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`Backend error: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    message = data.message;
                 }
                 
-                const data = await response.json();
-                if (!data.message) {
-                    log('Backend response: ' + JSON.stringify(data), 'error');
-                    throw new Error('Backend response missing "message" field');
-                }
-                const message = data.message;
+                log('[SIWE] Got message, requesting signature...', 'info');
                 
                 // Sign the message
                 const signature = await this.provider.request({
@@ -222,12 +428,19 @@
                 return [name || address, message, signature, avatar];
             }
             
-            async runSigningProcess(cb) {
+            async runSigningProcess(cb, options = {}) {
+                this.parseUrlParams();
+                
+                if (options.returnTo) {
+                    this._returnTo = options.returnTo;
+                }
+                
+                // Clean up any previous subscription
                 if (this._currentUnsubscribe) {
                     try {
                         this._currentUnsubscribe();
                     } catch (e) {
-                        log('Cleanup previous subscription', 'info');
+                        log('[SIWE] Cleanup previous subscription', 'info');
                     }
                     this._currentUnsubscribe = null;
                 }
@@ -237,110 +450,126 @@
                 let initialCheckDone = false;
                 
                 const callback = cb;
+                const self = this;
                 
-                // Subscribe to account changes - check what it returns
                 const unsubscribeResult = this.modal.subscribeAccount(async (account) => {
-                    // Skip the first fire (existing connection check on init)
                     if (!initialCheckDone) {
                         initialCheckDone = true;
-                        if (account.isConnected) {
-                            log('Existing connection detected, waiting for user action', 'info');
+                        
+                        if (account.isConnected && account.address && self._expectedWallet) {
+                            const connectedLower = account.address.toLowerCase();
+                            if (connectedLower === self._expectedWallet) {
+                                log('[SIWE] Auto-connect: wallet matches expected address', 'info');
+                            } else {
+                                log('[SIWE] Auto-connect: connected wallet does not match expected', 'warn');
+                                return;
+                            }
+                        } else if (account.isConnected) {
+                            log('[SIWE] Existing connection detected, waiting for user action', 'info');
+                            return;
+                        } else {
+                            return;
                         }
-                        return;
                     }
                     
-                    // Guard: skip if already processing or completed
                     if (isProcessing || hasCompleted) {
+                        log('[SIWE] Skipping - already processing or completed', 'warn');
                         return;
                     }
                     
                     if (account.isConnected && account.address) {
-                        isProcessing = true;
-                        this.connectedAddress = account.address;
-                        
-                        // Only log once per unique address
-                        if (!this._lastLoggedAddress || this._lastLoggedAddress !== account.address) {
-                            log('Wallet connected: ' + account.address, 'success');
-                            this._lastLoggedAddress = account.address;
+                        if (self._expectedWallet) {
+                            const connectedLower = account.address.toLowerCase();
+                            if (connectedLower !== self._expectedWallet) {
+                                log('[SIWE] Connected wallet does not match expected', 'warn');
+                                return;
+                            }
                         }
                         
-                        // Wait a moment for provider to be ready
+                        isProcessing = true;
+                        self.connectedAddress = account.address;
+                        log('[SIWE] Wallet connected: ' + account.address, 'success');
+                        
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
-                        if (this.provider) {
+                        if (self.provider) {
                             try {
-                                log('Starting sign message flow', 'info');
-                                const result = await this.signMessage(account.address);
-                                log('Sign successful, calling callback', 'success');
+                                log('[SIWE] Starting sign message flow', 'info');
+                                const result = await self.signMessage(account.address);
+                                log('[SIWE] Sign successful, calling callback', 'success');
                                 hasCompleted = true;
                                 
-                                // Try to unsubscribe, but don't let it block the callback
                                 try {
-                                    if (this._currentUnsubscribe && typeof this._currentUnsubscribe === 'function') {
-                                        this._currentUnsubscribe();
-                                        log('Successfully unsubscribed', 'info');
-                                    } else {
-                                        log('No unsubscribe function available (this is OK)', 'info');
+                                    if (self._currentUnsubscribe && typeof self._currentUnsubscribe === 'function') {
+                                        self._currentUnsubscribe();
                                     }
                                 } catch (e) {
-                                    log('Unsubscribe error (non-fatal, continuing): ' + e.message, 'warn');
+                                    log('[SIWE] Unsubscribe error (non-fatal): ' + e.message, 'warn');
                                 }
                                 
-                                this._currentUnsubscribe = null;
+                                self._currentUnsubscribe = null;
                                 
-                                // Call the callback - this is the important part
                                 if (typeof callback === 'function') {
-                                    try {
-                                        callback(result);
-                                    } catch (callbackError) {
-                                        log('Callback error: ' + callbackError.message, 'error');
-                                        log('Callback error stack: ' + (callbackError.stack || 'no stack'), 'error');
-                                        throw callbackError; // Re-throw to be caught by outer catch
-                                    }
-                                } else {
-                                    log('Callback is not a function: ' + typeof callback, 'error');
+                                    callback(result);
                                 }
                             } catch (e) {
-                                log('Sign process error: ' + e.message, 'error');
-                                log('Error stack: ' + (e.stack || 'no stack'), 'error');
-                                log('Error details: ' + JSON.stringify(e, Object.getOwnPropertyNames(e)), 'error');
-                                // Reset processing flag on error so user can retry
+                                log('[SIWE] Sign process error: ' + e.message, 'error');
                                 isProcessing = false;
                             }
                         } else {
-                            log('Provider not ready, waiting...', 'warn');
+                            log('[SIWE] Provider not ready, waiting...', 'warn');
                             isProcessing = false;
                         }
                     }
                 });
                 
-                // Log what subscribeAccount returned for debugging
-                log('subscribeAccount returned: ' + typeof unsubscribeResult + (unsubscribeResult ? ' (has unsubscribe: ' + (typeof unsubscribeResult.unsubscribe === 'function') + ')' : ' (null/undefined)'), 'info');
+                log('[SIWE] subscribeAccount returned: ' + typeof unsubscribeResult, 'info');
                 
-                // Store unsubscribe function for cleanup (handle different return types)
-                let unsubscribeFn = null;
-                if (typeof unsubscribeResult === 'function') {
-                    unsubscribeFn = unsubscribeResult;
-                } else if (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function') {
-                    unsubscribeFn = () => unsubscribeResult.unsubscribe();
-                }
-                this._currentUnsubscribe = unsubscribeFn;
+                this._currentUnsubscribe = typeof unsubscribeResult === 'function' 
+                    ? unsubscribeResult 
+                    : (unsubscribeResult && typeof unsubscribeResult.unsubscribe === 'function' 
+                        ? () => unsubscribeResult.unsubscribe()
+                        : null);
                 
                 await new Promise(resolve => setTimeout(resolve, 100));
                 
-                log('Opening wallet modal', 'info');
+                log('[SIWE] Opening wallet modal', 'info');
+                if (this._expectedWallet) {
+                    log('[SIWE] Expected wallet: ' + this._expectedWallet, 'info');
+                }
                 this.modal.open();
             }
         }
         
-        // Simulate the Controller's verifySignature method
+        // ============================================
+        // CONTROLLER SIMULATION - Matches actual plugin
+        // ============================================
+        
+        // Module-level state (like in the actual plugin)
+        let web3ModalInstance = null;
+        let isInitialized = false;
+        let autoConnectTriggered = false;  // NEW: Prevents duplicate auto-connect
+        let authInProgress = false;        // NEW: Prevents concurrent auth flows
+        
         function verifySignature(account, message, signature, avatar) {
             log('=== CALLBACK EXECUTED ===', 'success');
             log('Account: ' + account, 'info');
-            log('Message: ' + message.substring(0, 100) + '...', 'info');
+            log('Message length: ' + message.length + ' chars', 'info');
             log('Signature: ' + signature.substring(0, 20) + '...', 'info');
             
-            // Simulate form submission
+            // Validate with mock backend
+            const useMock = document.getElementById('useMockBackend').checked;
+            if (useMock) {
+                const validation = MockBackend.validateCallback(message, signature);
+                if (!validation.success) {
+                    log('=== BACKEND VALIDATION FAILED ===', 'error');
+                    log('Error: ' + validation.error, 'error');
+                    log('Message: ' + validation.message, 'error');
+                    return;
+                }
+                log('=== BACKEND VALIDATION SUCCESS ===', 'success');
+            }
+            
             const formData = {
                 eth_account: account,
                 eth_message: message,
@@ -354,12 +583,59 @@
             log('Form would be submitted to: /auth/siwe/callback', 'success');
         }
         
+        async function initAuth() {
+            // NEW: Prevent duplicate auth flows (matches plugin fix)
+            if (authInProgress) {
+                log('[Controller] Auth already in progress, skipping', 'warn');
+                return;
+            }
+            authInProgress = true;
+            
+            try {
+                const chainSelect = document.getElementById('chainId');
+                const chainId = chainSelect.value;
+                const chainName = chainSelect.options[chainSelect.selectedIndex].text.split(' ')[0];
+                
+                const env = {
+                    PROJECT_ID: document.getElementById('projectId').value.trim(),
+                    CHAIN_ID: chainId,
+                    CHAIN_NAME: chainName,
+                };
+                
+                if (!web3ModalInstance) {
+                    web3ModalInstance = new Web3Modal();
+                }
+                
+                if (!isInitialized) {
+                    log('[Controller] Initializing AppKit...', 'info');
+                    await web3ModalInstance.providerInit(env);
+                    isInitialized = true;
+                    log('[Controller] AppKit initialized', 'success');
+                }
+                
+                await web3ModalInstance.runSigningProcess((res) => {
+                    try {
+                        const [account, message, signature, avatar] = res;
+                        verifySignature(account, message, signature, avatar);
+                    } catch (e) {
+                        log('[Controller] Verify error: ' + e.message, 'error');
+                        authInProgress = false;
+                    }
+                }, {});
+            } catch (e) {
+                log('[Controller] Init auth error: ' + e.message, 'error');
+                authInProgress = false;
+            }
+        }
+        
+        // ============================================
+        // UI HANDLERS
+        // ============================================
+        
         const statusDiv = document.getElementById('status');
         const testBtn = document.getElementById('testBtn');
         const resetBtn = document.getElementById('resetBtn');
-        
-        let web3ModalInstance = null;
-        let isInitialized = false;
+        const hardResetBtn = document.getElementById('hardResetBtn');
         
         function log(message, type = 'info') {
             const p = document.createElement('p');
@@ -373,7 +649,7 @@
         async function testPluginFlow() {
             statusDiv.innerHTML = '';
             document.getElementById('formResult').style.display = 'none';
-            log('=== Starting Plugin Flow Test ===', 'info');
+            MockBackend.reset();
             
             const projectId = document.getElementById('projectId').value.trim();
             if (!projectId) {
@@ -381,33 +657,24 @@
                 return;
             }
             
-            const env = {
-                PROJECT_ID: projectId
-            };
+            log('=== Starting Plugin Flow Test ===', 'info');
             
-            // Use singleton pattern
-            if (!web3ModalInstance) {
-                web3ModalInstance = new Web3Modal();
+            // Check if we should simulate the duplicate init bug
+            const simulateDuplicate = document.getElementById('simulateDuplicate').checked;
+            if (simulateDuplicate) {
+                log('=== SIMULATING DUPLICATE INIT BUG ===', 'warn');
+                log('This will call initAuth() twice rapidly, like the Ember bug', 'warn');
+                
+                // Reset the guards to simulate the bug before our fix
+                autoConnectTriggered = false;
+                authInProgress = false;
+                
+                // Call twice rapidly - this is what was happening in Ember
+                initAuth();
+                setTimeout(() => initAuth(), 100);  // Second call 100ms later
+            } else {
+                initAuth();
             }
-            
-            // Only initialize AppKit once
-            if (!isInitialized) {
-                log('Initializing AppKit...', 'info');
-                await web3ModalInstance.providerInit(env);
-                isInitialized = true;
-                log('AppKit initialized', 'success');
-            }
-            
-            // Run signing process with callback (simulating controller)
-            log('Starting signing process...', 'info');
-            await web3ModalInstance.runSigningProcess((res) => {
-                try {
-                    const [account, message, signature, avatar] = res;
-                    verifySignature(account, message, signature, avatar);
-                } catch (e) {
-                    log('Verify error: ' + e.message, 'error');
-                }
-            });
         }
         
         testBtn.addEventListener('click', testPluginFlow);
@@ -415,9 +682,20 @@
         resetBtn.addEventListener('click', () => {
             statusDiv.innerHTML = '';
             document.getElementById('formResult').style.display = 'none';
+            MockBackend.reset();
+            authInProgress = false;  // Reset auth flag
+            log('Reset complete - ready for new test', 'info');
+        });
+        
+        hardResetBtn.addEventListener('click', () => {
+            statusDiv.innerHTML = '';
+            document.getElementById('formResult').style.display = 'none';
             web3ModalInstance = null;
             isInitialized = false;
-            log('Reset complete', 'info');
+            autoConnectTriggered = false;
+            authInProgress = false;
+            MockBackend.reset();
+            log('Hard reset complete - all state cleared', 'info');
         });
         
         // Initial check
