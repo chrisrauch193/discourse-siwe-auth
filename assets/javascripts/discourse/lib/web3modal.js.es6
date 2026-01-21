@@ -8,6 +8,16 @@ import {
 import loadScript from "discourse/lib/load-script";
 
 
+// Network configurations for common chains
+const NETWORK_CONFIGS = {
+    1: { id: 1, name: 'Ethereum', rpcUrl: 'https://eth.llamarpc.com' },
+    11155111: { id: 11155111, name: 'Sepolia', rpcUrl: 'https://rpc.sepolia.org' },
+    137: { id: 137, name: 'Polygon', rpcUrl: 'https://polygon-rpc.com' },
+    42161: { id: 42161, name: 'Arbitrum One', rpcUrl: 'https://arb1.arbitrum.io/rpc' },
+    10: { id: 10, name: 'Optimism', rpcUrl: 'https://mainnet.optimism.io' },
+    8453: { id: 8453, name: 'Base', rpcUrl: 'https://mainnet.base.org' },
+};
+
 const Web3Modal = EmberObject.extend({
     modal: null,
     wagmiAdapter: null,
@@ -16,6 +26,8 @@ const Web3Modal = EmberObject.extend({
     _currentUnsubscribe: null,  // Track current subscription to clean up
     _expectedWallet: null,      // Expected wallet from URL param
     _returnTo: null,            // Return URL after auth
+    _expectedChainId: null,     // Expected chain ID from settings
+    _expectedChainName: null,   // Expected chain name from settings
     
     /**
      * Parse URL parameters for auto-connect flow.
@@ -60,21 +72,50 @@ const Web3Modal = EmberObject.extend({
         const { createAppKit, WagmiAdapter, networks } = window.ReownAppKit;
         const projectId = env.PROJECT_ID;
         
+        // Store expected chain from settings
+        this._expectedChainId = env.CHAIN_ID ? parseInt(env.CHAIN_ID, 10) : null;
+        this._expectedChainName = env.CHAIN_NAME || null;
+        
+        console.log('[SIWE] Expected chain:', this._expectedChainId, this._expectedChainName);
+        
         // Get the site URL for metadata
         const siteUrl = window.location.origin;
         const siteName = document.title || 'Discourse';
         
-        // Create Wagmi adapter
+        // Determine which network to use
+        let targetNetwork = networks.mainnet; // Default
+        let networkList = [networks.mainnet, networks.sepolia];
+        
+        if (this._expectedChainId) {
+            // Map chain ID to AppKit network
+            const chainMap = {
+                1: networks.mainnet,
+                11155111: networks.sepolia,
+                137: networks.polygon,
+                42161: networks.arbitrum,
+                10: networks.optimism,
+                8453: networks.base,
+            };
+            
+            if (chainMap[this._expectedChainId]) {
+                targetNetwork = chainMap[this._expectedChainId];
+                // Only show the expected network
+                networkList = [targetNetwork];
+            }
+        }
+        
+        // Create Wagmi adapter with target network
         const wagmiAdapter = new WagmiAdapter({
             projectId,
-            networks: [networks.mainnet, networks.polygon]
+            networks: networkList
         });
         this.wagmiAdapter = wagmiAdapter;
         
         // Create AppKit modal
         const modal = createAppKit({
             adapters: [wagmiAdapter],
-            networks: [networks.mainnet, networks.polygon],
+            networks: networkList,
+            defaultNetwork: targetNetwork,
             projectId,
             metadata: {
                 name: siteName,
@@ -125,8 +166,32 @@ const Web3Modal = EmberObject.extend({
         try {
             const chainIdHex = await this.provider.request({ method: 'eth_chainId' });
             chainId = parseInt(chainIdHex, 16);
+            console.log('[SIWE] Connected chain ID:', chainId);
         } catch (error) {
             console.error('[SIWE] Chain ID error:', error);
+        }
+        
+        // Check if on the expected chain
+        if (this._expectedChainId && chainId !== this._expectedChainId) {
+            const networkName = this._expectedChainName || `Chain ${this._expectedChainId}`;
+            const errorMsg = `Please switch to ${networkName} (Chain ID: ${this._expectedChainId}) to sign in.`;
+            console.error('[SIWE] Wrong network:', errorMsg);
+            
+            // Try to request network switch
+            try {
+                await this.provider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: '0x' + this._expectedChainId.toString(16) }]
+                });
+                // Update chainId after switch
+                const newChainIdHex = await this.provider.request({ method: 'eth_chainId' });
+                chainId = parseInt(newChainIdHex, 16);
+                console.log('[SIWE] Switched to chain:', chainId);
+            } catch (switchError) {
+                console.error('[SIWE] Network switch failed:', switchError);
+                alert(errorMsg);
+                throw new Error(errorMsg);
+            }
         }
 
         // Get SIWE message from backend

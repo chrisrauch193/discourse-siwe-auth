@@ -7,3 +7,33 @@ plugins:
   siwe_statement:
     client: true
     default: 'Sign-in to Discourse via Ethereum'
+  
+  # DAO Network Configuration
+  siwe_chain_id:
+    default: 11155111
+    client: true
+    description: 'Chain ID for the DAO network (e.g., 11155111 for Sepolia, 1 for Mainnet)'
+  siwe_chain_name:
+    default: 'Sepolia'
+    client: true
+    description: 'Human-readable name for the network (shown in error messages)'
+  siwe_rpc_url:
+    default: ''
+    description: 'JSON-RPC URL for the DAO network (required for membership checks)'
+  
+  # DAO Contract Configuration
+  siwe_dao_contract_address:
+    default: ''
+    description: 'Address of the CoreDAO contract for membership verification'
+  siwe_enable_membership_check:
+    default: false
+    description: 'Enable on-chain membership verification during sign-in'
+  siwe_members_group:
+    default: 'dao_members'
+    description: 'Discourse group name for verified DAO members'
+  siwe_restricted_group:
+    default: 'dao_restricted'
+    description: 'Discourse group name for restricted DAO members'
+  siwe_guests_group:
+    default: 'dao_guests'
+    description: 'Discourse group name for non-members who signed in'

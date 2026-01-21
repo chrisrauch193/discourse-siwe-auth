@@ -1,8 +1,16 @@
 en:
   site_settings:
-    discourse_siwe_enabled: "Either the plugin is enabled or not"
-    siwe_project_id: "Project ID for Web3Modal"
-    siwe_statement: "Statement that will be displayed in the message"
+    discourse_siwe_enabled: "Enable Sign-in with Ethereum (SIWE) authentication"
+    siwe_project_id: "WalletConnect/Reown Project ID for wallet connections"
+    siwe_statement: "Statement displayed in the signature message"
+    siwe_chain_id: "Chain ID for the DAO network (e.g., 11155111 for Sepolia, 1 for Mainnet)"
+    siwe_chain_name: "Human-readable network name (shown in error messages)"
+    siwe_rpc_url: "JSON-RPC URL for the DAO network (required for membership checks)"
+    siwe_dao_contract_address: "Address of the CoreDAO contract for membership verification"
+    siwe_enable_membership_check: "Enable on-chain DAO membership verification during sign-in"
+    siwe_members_group: "Discourse group name for verified DAO members (full access)"
+    siwe_restricted_group: "Discourse group name for restricted DAO members (read-only)"
+    siwe_guests_group: "Discourse group name for non-members who signed in (read-only)"
     placeholder:
       siwe_json_rpc:
         key: "Chain ID"
@@ -16,3 +24,7 @@ en:
       title: "Sign-in with Ethereum"
       buttons:
         start: "Sign-in with Ethereum"
+      errors:
+        wrong_network: "Please switch to %{network_name} (Chain ID: %{chain_id}) to sign in"
+        not_a_member: "Your wallet is not a member of this DAO"
+        member_restricted: "Your DAO membership is restricted"

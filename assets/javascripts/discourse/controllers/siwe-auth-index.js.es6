@@ -90,6 +90,8 @@ export default Controller.extend({
 
       return {
         PROJECT_ID: siteSettings.siwe_project_id,
+        CHAIN_ID: siteSettings.siwe_chain_id,
+        CHAIN_NAME: siteSettings.siwe_chain_name,
       }
     });
     

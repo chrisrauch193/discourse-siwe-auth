@@ -56,7 +56,111 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
       auth_token.session.delete(:siwe_return_to)
     end
     
+    # Check DAO membership if enabled
+    if SiteSetting.siwe_enable_membership_check && 
+       SiteSetting.siwe_rpc_url.present? && 
+       SiteSetting.siwe_dao_contract_address.present?
+      
+      wallet_address = auth_token&.session&.dig(:siwe_address) || result.extra_data&.dig(:uid)
+      
+      if wallet_address.present?
+        membership_status = check_dao_membership(wallet_address)
+        result.extra_data ||= {}
+        result.extra_data[:dao_membership] = membership_status
+        
+        Rails.logger.info("[SIWE] Membership check for #{wallet_address}: #{membership_status}")
+        
+        # If this is an existing user logging in, update their group membership
+        if existing_account
+          update_dao_groups(existing_account, membership_status)
+        end
+      end
+    end
+    
     result
+  end
+  
+  def after_create_account(user, auth)
+    super
+    
+    # Assign user to appropriate group based on DAO membership
+    membership_status = auth&.extra_data&.dig(:dao_membership)
+    
+    if membership_status.present?
+      assign_dao_group(user, membership_status)
+    elsif SiteSetting.siwe_enable_membership_check
+      # If membership check is enabled but we don't have status, treat as guest
+      assign_dao_group(user, :guest)
+    end
+  end
+  
+  private
+  
+  def check_dao_membership(wallet_address)
+    require_relative '../lib/discourse_siwe/ethereum_client'
+    
+    client = DiscourseSiwe::EthereumClient.new(SiteSetting.siwe_rpc_url)
+    contract = SiteSetting.siwe_dao_contract_address
+    
+    is_member = client.is_member?(contract, wallet_address)
+    
+    if is_member
+      is_restricted = client.is_restricted?(contract, wallet_address)
+      is_restricted ? :restricted : :member
+    else
+      :guest
+    end
+  rescue StandardError => e
+    Rails.logger.error("[SIWE] Membership check failed: #{e.message}")
+    :guest
+  end
+  
+  def assign_dao_group(user, membership_status)
+    group_name = get_group_name_for_status(membership_status)
+    return if group_name.blank?
+    
+    group = Group.find_by(name: group_name)
+    if group && !user.groups.include?(group)
+      group.add(user)
+      Rails.logger.info("[SIWE] Added user #{user.username} to group #{group_name}")
+    elsif !group
+      Rails.logger.warn("[SIWE] Group '#{group_name}' not found - create it in Admin > Groups")
+    end
+  rescue StandardError => e
+    Rails.logger.error("[SIWE] Failed to assign group: #{e.message}")
+  end
+  
+  def update_dao_groups(user, membership_status)
+    # Remove user from all DAO groups first
+    all_dao_groups = [
+      SiteSetting.siwe_members_group,
+      SiteSetting.siwe_restricted_group,
+      SiteSetting.siwe_guests_group
+    ].compact.reject(&:blank?)
+    
+    all_dao_groups.each do |group_name|
+      group = Group.find_by(name: group_name)
+      if group && user.groups.include?(group)
+        group.remove(user)
+        Rails.logger.info("[SIWE] Removed user #{user.username} from group #{group_name}")
+      end
+    end
+    
+    # Add to the correct group
+    assign_dao_group(user, membership_status)
+  rescue StandardError => e
+    Rails.logger.error("[SIWE] Failed to update groups: #{e.message}")
+  end
+  
+  def get_group_name_for_status(membership_status)
+    case membership_status.to_sym
+    when :member
+      SiteSetting.siwe_members_group
+    when :restricted
+      SiteSetting.siwe_restricted_group
+    else
+      SiteSetting.siwe_guests_group
+    end
   end
 end
 
@@ -68,6 +172,7 @@ after_initialize do
   %w[
     ../lib/discourse_siwe/engine.rb
     ../lib/discourse_siwe/routes.rb
+    ../lib/discourse_siwe/ethereum_client.rb
     ../app/controllers/discourse_siwe/auth_controller.rb
   ].each { |path| load File.expand_path(path, __FILE__) }
 
