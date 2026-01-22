@@ -82,8 +82,12 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
             
             Rails.logger.info("[SIWE] Membership check for #{wallet_address}: #{membership_status}")
             
-            if existing_account
-              update_dao_groups(existing_account, membership_status)
+            # Update groups for existing users on every login
+            # This ensures membership changes (promoted, restricted, left DAO) are reflected
+            user_to_update = existing_account || result.user
+            if user_to_update
+              update_dao_groups(user_to_update, membership_status)
+              Rails.logger.info("[SIWE] Updated groups for user #{user_to_update.username} to #{membership_status}")
             end
           end
         end
