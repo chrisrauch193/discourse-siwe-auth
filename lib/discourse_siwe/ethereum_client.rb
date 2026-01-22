@@ -8,10 +8,10 @@ module DiscourseSiwe
   class EthereumClient
     # ABI function signatures (keccak256 hash of function signature, first 4 bytes)
     # isMember(address) -> 0xa230c524
-    # isRestricted(address) -> 0x4f6b27cd
+    # isRestricted(address) -> 0xc01bc982
     FUNCTION_SELECTORS = {
       is_member: '0xa230c524',
-      is_restricted: '0x4f6b27cd'
+      is_restricted: '0xc01bc982'
     }.freeze
 
     def initialize(rpc_url)
