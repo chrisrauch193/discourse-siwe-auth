@@ -204,6 +204,7 @@ after_initialize do
     ../lib/discourse_siwe/routes.rb
     ../lib/discourse_siwe/ethereum_client.rb
     ../app/controllers/discourse_siwe/auth_controller.rb
+    ../app/controllers/discourse_siwe/admin_controller.rb
   ].each { |path| load File.expand_path(path, __FILE__) }
 
   Discourse::Application.routes.prepend do
