@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# name: discourse-siwe
+# name: discourse-siwe-auth
 # about: A discourse plugin to enable users to authenticate via Sign In with Ethereum
 # version: 0.1.3
 
