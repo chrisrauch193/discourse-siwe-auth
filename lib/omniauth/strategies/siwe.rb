@@ -11,9 +11,24 @@ module OmniAuth
       end
 
       info do
+        eth_address = request.params[options.uid_field.to_s]
+        # Generate a short display name from the address
+        short_name = eth_address ? "#{eth_address[0..5]}...#{eth_address[-4..-1]}" : nil
+        
         {
-          name: request.params[options.uid_field.to_s],
-          image: request.params['eth_avatar']
+          name: short_name || eth_address,
+          nickname: eth_address ? eth_address.downcase : nil,
+          image: request.params['eth_avatar'],
+          # Note: email is intentionally nil - SIWE is email-less auth
+        }
+      end
+      
+      extra do
+        {
+          raw_info: {
+            eth_account: request.params['eth_account'],
+            eth_address: request.params['eth_account'],
+          }
         }
       end
 

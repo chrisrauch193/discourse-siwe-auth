@@ -46,22 +46,24 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
     false
   end
   
-  def after_authenticate(auth_token, existing_account: nil)
+  def after_authenticate(auth, existing_account: nil)
+    Rails.logger.info("[SIWE Authenticator] after_authenticate called")
+    Rails.logger.info("[SIWE Authenticator] auth uid: #{auth[:uid]}")
+    Rails.logger.info("[SIWE Authenticator] auth info: #{auth[:info]}")
+    
     result = super
     
-    # Handle return_to redirect from session (set in auth#index)
-    # Discourse will use destination_url after successful auth
-    if auth_token&.session && auth_token.session[:siwe_return_to]
-      result.destination_url = auth_token.session[:siwe_return_to]
-      auth_token.session.delete(:siwe_return_to)
-    end
+    Rails.logger.info("[SIWE Authenticator] super completed, result: #{result.inspect}")
+    
+    # Handle return_to redirect - check extra_data from the auth hash
+    # The session data is passed through auth[:extra][:raw_info] if needed
     
     # Check DAO membership if enabled
     if SiteSetting.siwe_enable_membership_check && 
        SiteSetting.siwe_rpc_url.present? && 
        SiteSetting.siwe_dao_contract_address.present?
       
-      wallet_address = auth_token&.session&.dig(:siwe_address) || result.extra_data&.dig(:uid)
+      wallet_address = auth[:uid] || auth.dig(:extra, :raw_info, :eth_address)
       
       if wallet_address.present?
         membership_status = check_dao_membership(wallet_address)
