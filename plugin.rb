@@ -192,6 +192,23 @@ after_initialize do
   Discourse::Application.routes.prepend do
     mount ::DiscourseSiwe::Engine, at: '/discourse-siwe'
   end
+  
+  # Debug hook: Wrap the OmniAuth callback to catch any errors after after_authenticate
+  reloadable_patch do
+    Users::OmniauthCallbacksController.class_eval do
+      around_action :siwe_debug_wrapper, only: [:complete]
+      
+      def siwe_debug_wrapper
+        Rails.logger.info("[SIWE Debug] Starting complete action")
+        yield
+        Rails.logger.info("[SIWE Debug] Completed successfully")
+      rescue => e
+        Rails.logger.error("[SIWE Debug] ERROR in complete action: #{e.class} - #{e.message}")
+        Rails.logger.error("[SIWE Debug] Backtrace:\n#{e.backtrace.first(20).join("\n")}")
+        raise
+      end
+    end
+  end
 end
 
 # Allow WebAssembly for AppKit wallet connections
