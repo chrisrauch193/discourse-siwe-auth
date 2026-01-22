@@ -51,35 +51,46 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
     Rails.logger.info("[SIWE Authenticator] auth uid: #{auth[:uid]}")
     Rails.logger.info("[SIWE Authenticator] auth info: #{auth[:info]}")
     
-    result = super
-    
-    Rails.logger.info("[SIWE Authenticator] super completed, result: #{result.inspect}")
-    
-    # Handle return_to redirect - check extra_data from the auth hash
-    # The session data is passed through auth[:extra][:raw_info] if needed
-    
-    # Check DAO membership if enabled
-    if SiteSetting.siwe_enable_membership_check && 
-       SiteSetting.siwe_rpc_url.present? && 
-       SiteSetting.siwe_dao_contract_address.present?
+    begin
+      result = super
       
-      wallet_address = auth[:uid] || auth.dig(:extra, :raw_info, :eth_address)
+      Rails.logger.info("[SIWE Authenticator] super completed, result class: #{result.class}")
+      Rails.logger.info("[SIWE Authenticator] result.failed?: #{result.failed?}")
+      Rails.logger.info("[SIWE Authenticator] result.user: #{result.user&.id}")
+      Rails.logger.info("[SIWE Authenticator] result.email: #{result.email.inspect}")
+      Rails.logger.info("[SIWE Authenticator] result.extra_data: #{result.extra_data.inspect}")
       
-      if wallet_address.present?
-        membership_status = check_dao_membership(wallet_address)
-        result.extra_data ||= {}
-        result.extra_data[:dao_membership] = membership_status
+      # Handle return_to redirect - check extra_data from the auth hash
+      # The session data is passed through auth[:extra][:raw_info] if needed
+      
+      # Check DAO membership if enabled
+      if SiteSetting.siwe_enable_membership_check && 
+         SiteSetting.siwe_rpc_url.present? && 
+         SiteSetting.siwe_dao_contract_address.present?
         
-        Rails.logger.info("[SIWE] Membership check for #{wallet_address}: #{membership_status}")
+        wallet_address = auth[:uid] || auth.dig(:extra, :raw_info, :eth_address)
         
-        # If this is an existing user logging in, update their group membership
-        if existing_account
-          update_dao_groups(existing_account, membership_status)
+        if wallet_address.present?
+          membership_status = check_dao_membership(wallet_address)
+          result.extra_data ||= {}
+          result.extra_data[:dao_membership] = membership_status
+          
+          Rails.logger.info("[SIWE] Membership check for #{wallet_address}: #{membership_status}")
+          
+          # If this is an existing user logging in, update their group membership
+          if existing_account
+            update_dao_groups(existing_account, membership_status)
+          end
         end
       end
+      
+      Rails.logger.info("[SIWE Authenticator] returning result successfully")
+      result
+    rescue StandardError => e
+      Rails.logger.error("[SIWE Authenticator] ERROR in after_authenticate: #{e.class} - #{e.message}")
+      Rails.logger.error("[SIWE Authenticator] Backtrace: #{e.backtrace&.first(10)&.join("\n")}")
+      raise
     end
-    
-    result
   end
   
   def after_create_account(user, auth)
