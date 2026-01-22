@@ -118,7 +118,7 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
   private
   
   def check_dao_membership(wallet_address)
-    require_relative '../lib/discourse_siwe/ethereum_client'
+    require_relative 'lib/discourse_siwe/ethereum_client'
     
     client = DiscourseSiwe::EthereumClient.new(SiteSetting.siwe_rpc_url)
     contract = SiteSetting.siwe_dao_contract_address
