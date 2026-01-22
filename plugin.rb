@@ -127,16 +127,21 @@ class ::SiweAuthenticator < ::Auth::ManagedAuthenticator
     client = DiscourseSiwe::EthereumClient.new(SiteSetting.siwe_rpc_url)
     contract = SiteSetting.siwe_dao_contract_address
     
+    Rails.logger.info("[SIWE] Checking membership for #{wallet_address} on contract #{contract}")
+    
     is_member = client.is_member?(contract, wallet_address)
+    Rails.logger.info("[SIWE] is_member? result: #{is_member}")
     
     if is_member
       is_restricted = client.is_restricted?(contract, wallet_address)
+      Rails.logger.info("[SIWE] is_restricted? result: #{is_restricted}")
       is_restricted ? :restricted : :member
     else
       :guest
     end
   rescue StandardError => e
     Rails.logger.error("[SIWE] Membership check failed: #{e.message}")
+    Rails.logger.error("[SIWE] Backtrace: #{e.backtrace.first(5).join("\n")}")
     :guest
   end
   
