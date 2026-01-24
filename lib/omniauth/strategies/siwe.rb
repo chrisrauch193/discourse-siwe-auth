@@ -12,12 +12,14 @@ module OmniAuth
 
       info do
         eth_address = request.params[options.uid_field.to_s]
-        # Generate a short display name from the address
-        short_name = eth_address ? "#{eth_address[0..5]}...#{eth_address[-4..-1]}" : nil
+        # Use full wallet address for both name and nickname
+        # Discourse max_username_length should be set to 60 in admin settings
+        # to accommodate 42-char wallet addresses
+        full_address = eth_address ? eth_address.downcase : nil
         
         {
-          name: short_name || eth_address,
-          nickname: eth_address ? eth_address.downcase : nil,
+          name: full_address,           # Display name: full wallet address
+          nickname: full_address,       # Username: full wallet address (lowercase)
           image: request.params['eth_avatar'],
           # Note: email is intentionally nil - SIWE is email-less auth
         }
