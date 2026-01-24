@@ -7,8 +7,9 @@ DiscourseSiwe::Engine.routes.draw do
   get '/check-session' => 'auth#check_session'
   
   # Admin API routes for wallet management
-  # These require admin authentication
-  namespace :admin do
+  # These require admin authentication (via API key with admin scope)
+  # Using scope instead of namespace to match DiscourseSiwe::AdminController
+  scope '/admin', as: 'admin' do
     post '/link_wallet' => 'admin#link_wallet'
     delete '/unlink_wallet' => 'admin#unlink_wallet'
     get '/wallet_status' => 'admin#wallet_status'

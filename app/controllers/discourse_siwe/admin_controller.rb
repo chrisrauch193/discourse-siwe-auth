@@ -1,9 +1,25 @@
 # frozen_string_literal: true
 
 module DiscourseSiwe
-  class AdminController < ::Admin::AdminController
+  class AdminController < ::ApplicationController
     # Admin-only controller for managing SIWE wallet links
-    # All actions require admin authentication
+    # Requires admin authentication (via session or API key)
+    
+    before_action :ensure_admin
+    skip_before_action :check_xhr, only: [:link_wallet, :unlink_wallet, :wallet_status, :bulk_link_wallets]
+    skip_before_action :verify_authenticity_token, only: [:link_wallet, :unlink_wallet, :bulk_link_wallets]
+    
+    private
+    
+    def ensure_admin
+      # Check if user is admin via session or API key
+      unless current_user&.admin?
+        render json: { success: false, error: "Admin access required" }, status: 403
+        return false
+      end
+    end
+    
+    public
     
     # POST /discourse-siwe/admin/link_wallet
     # Links a wallet address to an existing user
