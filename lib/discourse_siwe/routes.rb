@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 DiscourseSiwe::Engine.routes.draw do
-  # Serve AppKit bundle (fixes 404 for loadScript in Discourse)
-  get '/javascripts/appkit-bundle.min.js' => 'assets#appkit_bundle', format: false
+  # Serve AppKit bundle when assets_controller exists (optional so clone-without-file still boots)
+  assets_controller_path = File.expand_path("../../../app/controllers/discourse_siwe/assets_controller.rb", __FILE__)
+  if File.exist?(assets_controller_path)
+    get '/javascripts/appkit-bundle.min.js' => 'assets#appkit_bundle', format: false
+  end
 
   # Public auth routes
   get '/auth' => 'auth#index'

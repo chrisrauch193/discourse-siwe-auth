@@ -199,14 +199,20 @@ auth_provider authenticator: ::SiweAuthenticator.new,
               full_screen_login: true
 
 after_initialize do
-  %w[
-    ../lib/discourse_siwe/engine.rb
-    ../lib/discourse_siwe/routes.rb
-    ../lib/discourse_siwe/ethereum_client.rb
-    ../app/controllers/discourse_siwe/auth_controller.rb
-    ../app/controllers/discourse_siwe/admin_controller.rb
-    ../app/controllers/discourse_siwe/assets_controller.rb
+  plugin_root = File.dirname(__FILE__)
+  assets_controller_path = File.join(plugin_root, "app/controllers/discourse_siwe/assets_controller.rb")
+
+  [
+    "../lib/discourse_siwe/engine.rb",
+    "../lib/discourse_siwe/routes.rb",
+    "../lib/discourse_siwe/ethereum_client.rb",
+    "../app/controllers/discourse_siwe/auth_controller.rb",
+    "../app/controllers/discourse_siwe/admin_controller.rb",
   ].each { |path| load File.expand_path(path, __FILE__) }
+
+  if File.exist?(assets_controller_path)
+    load assets_controller_path
+  end
 
   Discourse::Application.routes.prepend do
     mount ::DiscourseSiwe::Engine, at: '/discourse-siwe'
