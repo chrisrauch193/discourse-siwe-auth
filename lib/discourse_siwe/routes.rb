@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 DiscourseSiwe::Engine.routes.draw do
+  # Serve AppKit bundle (fixes 404 for loadScript in Discourse)
+  get '/javascripts/appkit-bundle.min.js' => 'assets#appkit_bundle', format: false
+
   # Public auth routes
   get '/auth' => 'auth#index'
   get '/message' => 'auth#message'

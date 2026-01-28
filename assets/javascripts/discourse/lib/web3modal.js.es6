@@ -144,8 +144,9 @@ const Web3Modal = EmberObject.extend({
     },
 
     async loadScripts() {
+        // Served by DiscourseSiwe::AssetsController (engine route)
         return Promise.all([
-            loadScript("/plugins/discourse-siwe/javascripts/appkit-bundle.min.js"),
+            loadScript("/discourse-siwe/javascripts/appkit-bundle.min.js"),
         ]);
     },
 

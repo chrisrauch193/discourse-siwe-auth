@@ -35,19 +35,21 @@ export default Controller.extend({
    * But first check if user is already logged in.
    */
   async _checkAutoConnect() {
-    const now = Date.now();
-    
-    // Prevent rapid duplicate auto-connect calls (within cooldown window)
-    if (now - lastAutoConnectTime < AUTO_CONNECT_COOLDOWN) {
-      console.log('[SIWE] Auto-connect called too recently, skipping (cooldown)');
-      this.set('isLoading', false);
-      return;
-    }
-    lastAutoConnectTime = now;
-    
     const params = new URLSearchParams(window.location.search);
     const wallet = params.get('wallet');
     const returnTo = params.get('return_to') || '/';
+
+    // Cooldown only when we're about to auto-connect (wallet param present).
+    // Avoids skipping the first load when controller runs multiple times on init.
+    if (wallet && wallet.startsWith('0x')) {
+      const now = Date.now();
+      if (now - lastAutoConnectTime < AUTO_CONNECT_COOLDOWN) {
+        console.log('[SIWE] Auto-connect called too recently, skipping (cooldown)');
+        this.set('isLoading', false);
+        return;
+      }
+      lastAutoConnectTime = now;
+    }
     
     // First check if already logged in via Discourse
     // The server-side controller already redirects if logged in,
