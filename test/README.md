@@ -2,6 +2,26 @@
 
 This directory contains standalone test pages for testing the SIWE plugin without needing to run a full Discourse instance.
 
+## Local tester (bypass Discourse 404)
+
+When Discourse returns 404 for `/discourse-siwe/javascripts/appkit-bundle.min.js`, you can still debug the SIWE flow by loading the AppKit bundle from disk and talking to the real forum for `/discourse-siwe/message` etc.
+
+From the **plugin repo root** (one level above this `test/` folder):
+
+```bash
+cd discourse-siwe-auth
+pnpm run serve
+# or: npx serve . -p 3333
+```
+
+Then open **http://localhost:3333/test/test-plugin-flow.html** in your browser.
+
+- The AppKit script loads from `http://localhost:3333/public/javascripts/appkit-bundle.min.js` (no 404).
+- Set "Real Backend URL" to `https://forum.chrisrauch.org` and **uncheck** "Use Mock Backend" to hit the real forum for message/session APIs.
+- Use "Test Full Plugin Flow" to walk through connect + sign against the live Discourse instance.
+
+Same idea for `test-appkit.html`: open **http://localhost:3333/test/test-appkit.html** to load the bundle locally.
+
 ## Test Pages
 
 ### 1. `test-appkit.html` - Basic AppKit Test
@@ -11,7 +31,7 @@ Tests the Reown AppKit bundle in isolation:
 - Sign a test message
 
 **Usage:**
-1. Open `test-appkit.html` in a browser
+1. Run `pnpm run serve` from repo root, then open http://localhost:3333/test/test-appkit.html (or open the file directly if you only need offline checks).
 2. Enter your WalletConnect Project ID (optional - can test with injected wallet only)
 3. Click "Initialize AppKit"
 4. Click "Connect Wallet"
@@ -26,9 +46,9 @@ Simulates the complete Discourse plugin flow:
 - Form submission simulation
 
 **Usage:**
-1. Open `test-plugin-flow.html` in a browser
+1. Run `pnpm run serve` from repo root, then open http://localhost:3333/test/test-plugin-flow.html.
 2. Enter your WalletConnect Project ID (required)
-3. Enter backend URL (default: `https://forum.chrisrauch.org`)
+3. Enter backend URL (default: `https://forum.chrisrauch.org`), uncheck "Use Mock Backend" to hit the real forum.
 4. Click "Test Full Plugin Flow"
 5. Connect wallet and sign
 6. View the callback result and form data
@@ -60,13 +80,19 @@ This will generate `public/javascripts/appkit-bundle.min.js` which is loaded by 
 
 If you see errors:
 
-1. **WebAssembly CSP error**: The CSP directive `wasm_unsafe_eval` needs to be added to Discourse's CSP (already done in `plugin.rb`)
+1. **404 for `appkit-bundle.min.js` / MIME type 'text/html'** (on the forum):
+   - Discourse is returning an HTML 404, so the plugin route for the bundle is not active.
+   - Ensure `app/controllers/discourse_siwe/assets_controller.rb` is in the repo and has been pushed. Rebuild the Discourse container so it clones the latest plugin.
+   - Check that the route exists: `curl -I https://forum.chrisrauch.org/discourse-siwe/javascripts/appkit-bundle.min.js` — you want `200` and `Content-Type: application/javascript`, not `404` and `text/html`.
+   - Use the **local tester** above: run `pnpm run serve` and open the test page from `http://localhost:3333/test/` so the bundle is loaded from disk and you can still hit the real forum for `/discourse-siwe/message`.
 
-2. **"r is not a function"**: This was a callback context issue - make sure `this` is bound correctly in the controller
+2. **WebAssembly CSP error**: The CSP directive `wasm_unsafe_eval` needs to be added to Discourse's CSP (already done in `plugin.rb`)
 
-3. **500 error on `/discourse-siwe/message`**: Check that ETH address is being converted to EIP-55 checksum format
+3. **"r is not a function"**: This was a callback context issue - make sure `this` is bound correctly in the controller
 
-4. **WalletConnect not working**: Make sure Project ID is correct and network requests aren't blocked
+4. **500 error on `/discourse-siwe/message`**: Check that ETH address is being converted to EIP-55 checksum format
+
+5. **WalletConnect not working**: Make sure Project ID is correct and network requests aren't blocked
 
 ## Notes
 
